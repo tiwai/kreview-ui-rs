@@ -1,0 +1,156 @@
+use serde::{Deserialize, Serialize};
+use std::fs;
+use std::path::{Path, PathBuf};
+
+#[derive(Debug, Clone)]
+pub struct Config {
+    pub database_path: PathBuf,
+    pub default_branch: String,
+    pub downstream_repo: Option<PathBuf>,
+    pub suse_repo: Option<PathBuf>,
+    pub upstream_repo: Option<PathBuf>,
+    pub theme: String,
+    pub show_token_stats: bool,
+    pub markers_dir: PathBuf,
+}
+
+#[derive(Debug, Clone, Deserialize, Serialize, Default)]
+pub struct ConfigJson {
+    pub database_path: Option<String>,
+    pub default_branch: Option<String>,
+    pub downstream_repo: Option<String>,
+    pub suse_repo: Option<String>,
+    pub upstream_repo: Option<String>,
+    pub theme: Option<String>,
+    pub show_token_stats: Option<bool>,
+    pub markers_dir: Option<String>,
+}
+
+impl Default for Config {
+    fn default() -> Self {
+        let home_opt = std::env::var("HOME").ok();
+        let markers_dir = if let Some(home) = home_opt {
+            PathBuf::from(home).join(".local/share/kreview-ui/markers")
+        } else {
+            PathBuf::from(".local/share/kreview-ui/markers")
+        };
+        Config {
+            database_path: PathBuf::from("./kreviews"),
+            default_branch: "SLE12-SP3-TD".to_string(),
+            downstream_repo: None,
+            suse_repo: None,
+            upstream_repo: None,
+            theme: "textual-dark".to_string(),
+            show_token_stats: true,
+            markers_dir,
+        }
+    }
+}
+
+pub fn expand_tilde(path_str: &str) -> PathBuf {
+    if path_str.starts_with("~/") || path_str == "~" {
+        if let Ok(home) = std::env::var("HOME") {
+            let mut buf = PathBuf::from(home);
+            if path_str.len() > 2 {
+                buf.push(&path_str[2..]);
+            }
+            return buf;
+        }
+    }
+    PathBuf::from(path_str)
+}
+
+impl Config {
+    pub fn load() -> Self {
+        let mut config = Config::default();
+
+        // System config /etc/kreview-ui.json
+        let system_config = Path::new("/etc/kreview-ui.json");
+        if system_config.exists() {
+            if let Ok(content) = fs::read_to_string(system_config) {
+                if let Ok(json) = serde_json::from_str::<ConfigJson>(&content) {
+                    config.apply_json(json);
+                }
+            }
+        }
+
+        // User config ~/.config/kreview-ui.json
+        if let Ok(home) = std::env::var("HOME") {
+            let user_config = PathBuf::from(home).join(".config/kreview-ui.json");
+            if user_config.exists() {
+                if let Ok(content) = fs::read_to_string(user_config) {
+                    if let Ok(json) = serde_json::from_str::<ConfigJson>(&content) {
+                        config.apply_json(json);
+                    }
+                }
+            }
+        }
+
+        // Local workspace kreview-ui.json (extremely useful for this workspace!)
+        let local_config = Path::new("kreview-ui.json");
+        if local_config.exists() {
+            if let Ok(content) = fs::read_to_string(local_config) {
+                if let Ok(json) = serde_json::from_str::<ConfigJson>(&content) {
+                    config.apply_json(json);
+                }
+            }
+        }
+
+        config
+    }
+
+    pub fn apply_json(&mut self, json: ConfigJson) {
+        if let Some(db_path) = json.database_path {
+            self.database_path = expand_tilde(&db_path);
+        }
+        if let Some(branch) = json.default_branch {
+            self.default_branch = branch;
+        }
+        if let Some(downstream) = json.downstream_repo {
+            self.downstream_repo = Some(expand_tilde(&downstream));
+        }
+        if let Some(suse) = json.suse_repo {
+            self.suse_repo = Some(expand_tilde(&suse));
+        }
+        if let Some(upstream) = json.upstream_repo {
+            self.upstream_repo = Some(expand_tilde(&upstream));
+        }
+        if let Some(theme) = json.theme {
+            self.theme = theme;
+        }
+        if let Some(show_stats) = json.show_token_stats {
+            self.show_token_stats = show_stats;
+        }
+        if let Some(markers) = json.markers_dir {
+            self.markers_dir = expand_tilde(&markers);
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_expand_tilde() {
+        std::env::set_var("HOME", "/custom/home");
+        assert_eq!(expand_tilde("~/test/path"), PathBuf::from("/custom/home/test/path"));
+        assert_eq!(expand_tilde("~"), PathBuf::from("/custom/home"));
+        assert_eq!(expand_tilde("/regular/path"), PathBuf::from("/regular/path"));
+    }
+
+    #[test]
+    fn test_config_json_apply() {
+        let mut config = Config::default();
+        let json = ConfigJson {
+            default_branch: Some("TEST_BRANCH".to_string()),
+            show_token_stats: Some(false),
+            theme: Some("light".to_string()),
+            ..Default::default()
+        };
+        config.apply_json(json);
+        assert_eq!(config.default_branch, "TEST_BRANCH");
+        assert_eq!(config.show_token_stats, false);
+        assert_eq!(config.theme, "light");
+    }
+}

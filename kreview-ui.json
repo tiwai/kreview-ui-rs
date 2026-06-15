@@ -1,0 +1,10 @@
+{
+  "database_path": "/home/tiwai/tmp/kreviews/db",
+  "default_branch": "SLE12-SP3-TD",
+  "downstream_repo": "/home/tiwai/kernel/suse/expand/kernel",
+  "suse_repo": "/home/tiwai/kernel/suse/kernel-source",
+  "upstream_repo": "/home/tiwai/git/linus",
+  "theme": "ansi-light",
+  "show_token_stats": true,
+  "markers_dir": "/home/tiwai/.local/share/kreview-ui/markers"
+}
