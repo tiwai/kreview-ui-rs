@@ -11,6 +11,7 @@ A high-performance Terminal UI (TUI) program written in Rust for displaying and 
 - **Standard Git Diff Highlighting:** Complete color-coded rendering of code additions (Green), deletions (Red), hunk boundaries (Cyan), and metadata/index headers (Magenta).
 - **Inline Review Highlighting:** Parses and styles quoted code segments starting with `>` inside review text blocks, preserving exact indentation, multiple spaces, and 8-character Linux kernel tab-alignments.
 - **Persistent Status Tracking:** Toggle status (`⚪ Unread` → `✅ OK` → `❌ Bad`) with persistent marker files stored securely. Existing notes inside status marker files are safely preserved.
+- **Diff View:** Compare downstream and upstream commits to see code differences (commit log excluded) via the `d` key.
 - **Multilayer Config Cascading:** Config values merge seamlessly: Command Line Args > Local `kreview-ui.json` > User `~/.config/kreview-ui.json` > System `/etc/kreview-ui.json` > Default values.
 - **Keyboard-driven Dialog forms:**
   - `Ctrl+A` Filter by Author
@@ -36,6 +37,7 @@ A high-performance Terminal UI (TUI) program written in Rust for displaying and 
 | `c` | Show downstream commit details |
 | `k` | Show SUSE kernel-source commit details |
 | `u` | Show upstream Linux commit details |
+| `d` | Show code-only diff between downstream and upstream commits |
 | `p` | Show AI fix patches (if available) |
 | `1` - `5` | Open review for model at column index 1-5 |
 | `Ctrl+A` | Open **Author Filter** dialog |
@@ -54,6 +56,7 @@ A high-performance Terminal UI (TUI) program written in Rust for displaying and 
 | `c` | Switch to downstream commit details |
 | `k` | Switch to SUSE kernel-source commit details |
 | `u` | Switch to upstream Linux commit details |
+| `d` | Switch to code-only diff between downstream and upstream commits |
 | `1` - `5` | Switch to inline review for model index 1-5 |
 | `Esc` / `q` | Go back (restores previous screen in history) |
 

@@ -340,6 +340,7 @@ impl TuiApp {
             let mut show_downstream = None;
             let mut show_suse = None;
             let mut show_upstream = None;
+            let mut show_diff = None;
 
             match key.code {
                 KeyCode::Esc | KeyCode::Char('q') => {
@@ -382,6 +383,13 @@ impl TuiApp {
                         show_upstream = Some(sha);
                     }
                 }
+                KeyCode::Char('d') => {
+                    let d_sha = s.commit_info.get("downstream_sha").cloned();
+                    let u_sha = s.commit_info.get("upstream_sha").cloned();
+                    if let (Some(d), Some(u)) = (d_sha, u_sha) {
+                        show_diff = Some((d, u));
+                    }
+                }
                 KeyCode::Char('1') => { review_index = Some(0); }
                 KeyCode::Char('2') => { review_index = Some(1); }
                 KeyCode::Char('3') => { review_index = Some(2); }
@@ -422,6 +430,16 @@ impl TuiApp {
                     self.active_screen = ActiveScreen::ContentViewer(ContentViewerState::new_with_info(
                         content,
                         format!("Upstream Commit: {}", &sha[..12]),
+                        false,
+                        s.commit_info.clone(),
+                    ));
+                }
+            } else if let Some((d_sha, u_sha)) = show_diff {
+                if let Ok(content) = self.git_viewer.diff_downstream_upstream(&d_sha, Some(&u_sha)) {
+                    self.screen_history.push(self.active_screen.clone());
+                    self.active_screen = ActiveScreen::ContentViewer(ContentViewerState::new_with_info(
+                        content,
+                        format!("Diff: {} vs {}", &d_sha[..12], &u_sha[..12]),
                         false,
                         s.commit_info.clone(),
                     ));
@@ -601,6 +619,11 @@ impl TuiApp {
                             self.action_show_upstream(&commit);
                         }
                     }
+                    KeyCode::Char('d') => {
+                        if let Some(commit) = self.get_selected_commit() {
+                            self.action_show_diff(&commit);
+                        }
+                    }
                     KeyCode::Char('p') => {
                         if let Some(commit) = self.get_selected_commit() {
                             self.action_show_patches(&commit);
@@ -751,6 +774,40 @@ impl TuiApp {
         }
     }
 
+    fn action_show_diff(&mut self, commit: &CommitReview) {
+        self.screen_history.clear();
+        let mut commit_info = HashMap::new();
+        commit_info.insert("downstream_sha".to_string(), commit.sha.clone());
+        if let Some(ref suse) = commit.suse_commit {
+            commit_info.insert("suse_sha".to_string(), suse.clone());
+        }
+        if let Some(ref upstream) = commit.upstream_commit {
+            commit_info.insert("upstream_sha".to_string(), upstream.clone());
+        }
+
+        match self.git_viewer.diff_downstream_upstream(&commit.sha, commit.upstream_commit.as_deref()) {
+            Ok(content) => {
+                let u_title = commit.upstream_commit.as_ref().map(|s| {
+                    if s.len() > 12 { &s[..12] } else { s }
+                }).unwrap_or("");
+                self.active_screen = ActiveScreen::ContentViewer(ContentViewerState::new_with_info(
+                    content,
+                    format!("Diff: {} vs {}", &commit.sha[..12], u_title),
+                    false,
+                    commit_info,
+                ));
+            }
+            Err(e) => {
+                self.active_screen = ActiveScreen::ContentViewer(ContentViewerState::new_with_info(
+                    format!("Error: {}", e),
+                    "Diff View".to_string(),
+                    false,
+                    commit_info,
+                ));
+            }
+        }
+    }
+
     fn action_show_patches(&mut self, commit: &CommitReview) {
         self.screen_history.clear();
         let mut model_with_patches = None;
@@ -865,10 +922,10 @@ impl TuiApp {
         // Footer
         let footer_text = match self.active_screen {
             ActiveScreen::MainTable => {
-                "Enter: Cell Action | x: Toggle status | c: Downstream | k: SUSE | u: Upstream | 1-3: Review | Ctrl+A: Author | Ctrl+L: Severity | Ctrl+F: Search | Ctrl+B: Branch | m: Models | q: Quit"
+                "Enter: Cell Action | x: Toggle status | c: Downstream | k: SUSE | u: Upstream | d: Diff | 1-3: Review | Ctrl+A: Author | Ctrl+L: Severity | Ctrl+F: Search | Ctrl+B: Branch | m: Models | q: Quit"
             }
             ActiveScreen::ContentViewer(_) => {
-                "Esc/q: Back | c: Downstream | k: SUSE | u: Upstream | 1-3: Review | Up/Down: Scroll"
+                "Esc/q: Back | c: Downstream | k: SUSE | u: Upstream | d: Diff | 1-3: Review | Up/Down: Scroll"
             }
         };
         let footer = Paragraph::new(footer_text).bg(Color::DarkGray).fg(Color::White);
@@ -1089,7 +1146,7 @@ impl TuiApp {
             let is_line_diff = if s.is_downstream_view {
                 line_is_diff[idx]
             } else {
-                s.title.contains("Commit:") || s.title.contains("Patches:")
+                s.title.contains("Commit:") || s.title.contains("Patches:") || s.title.contains("Diff:")
             };
 
             if is_line_diff {
