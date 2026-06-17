@@ -36,7 +36,7 @@ A high-performance Terminal UI (TUI) program written in Rust for displaying and 
 | `Enter` | **Subject cell:** Open downstream view<br>**Model cell:** Open inline model review |
 | `x` | Toggle commit status (Unread → OK → Bad) |
 | `c` | Show downstream commit details |
-| `k` | Show SUSE kernel-source commit details |
+| `s` | Show SUSE kernel-source commit details |
 | `u` | Show upstream Linux commit details |
 | `d` | Show code-only diff between downstream and upstream commits |
 | `p` | Show AI fix patches (if available) |
@@ -56,7 +56,7 @@ A high-performance Terminal UI (TUI) program written in Rust for displaying and 
 | `PageUp` / `PageDown` | Scroll 15 lines up / down |
 | `Home` / `End` | Jump to top / bottom of content |
 | `c` | Switch to downstream commit details |
-| `k` | Switch to SUSE kernel-source commit details |
+| `s` | Switch to SUSE kernel-source commit details |
 | `u` | Switch to upstream Linux commit details |
 | `d` | Switch to code-only diff between downstream and upstream commits |
 | `1` - `5` | Switch to inline review for model index 1-5 |

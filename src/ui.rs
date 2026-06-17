@@ -403,7 +403,7 @@ impl TuiApp {
                         show_downstream = Some(sha);
                     }
                 }
-                KeyCode::Char('k') => {
+                KeyCode::Char('s') => {
                     if let Some(sha) = s.commit_info.get("suse_sha").cloned() {
                         show_suse = Some(sha);
                     }
@@ -663,7 +663,7 @@ impl TuiApp {
                             self.action_show_downstream(&commit);
                         }
                     }
-                    KeyCode::Char('k') => {
+                    KeyCode::Char('s') => {
                         if let Some(commit) = self.get_selected_commit() {
                             self.action_show_suse(&commit);
                         }
@@ -1046,10 +1046,10 @@ impl TuiApp {
         // Footer
         let footer_text = match self.active_screen {
             ActiveScreen::MainTable => {
-                "h/?: Help | Enter: Cell Action | x: Toggle status | c: Downstream | k: SUSE | u: Upstream | d: Diff | 1-3: Review | Ctrl+A: Author | Ctrl+L: Severity | Ctrl+F: Search | Ctrl+B: Branch | m: Models | q: Quit"
+                "h/?: Help | Enter: Cell Action | x: Toggle status | c: Downstream | s: SUSE | u: Upstream | d: Diff | 1-3: Review | Ctrl+A: Author | Ctrl+L: Severity | Ctrl+F: Search | Ctrl+B: Branch | m: Models | q: Quit"
             }
             ActiveScreen::ContentViewer(_) => {
-                "h/?: Help | Esc/q: Back | c: Downstream | k: SUSE | u: Upstream | d: Diff | 1-3: Review | Up/Down: Scroll"
+                "h/?: Help | Esc/q: Back | c: Downstream | s: SUSE | u: Upstream | d: Diff | 1-3: Review | Up/Down: Scroll"
             }
         };
         let footer = Paragraph::new(footer_text)
@@ -1673,7 +1673,7 @@ impl TuiApp {
                 add_item(None, "Actions & Commits");
                 add_item(Some("x"), "Toggle status (Unread -> Ok -> Bad)");
                 add_item(
-                    Some("c / k / u"),
+                    Some("c / s / u"),
                     "View Downstream / SUSE / Upstream commit",
                 );
                 add_item(Some("d / p"), "Show diff (Down vs Up) / View patches");
