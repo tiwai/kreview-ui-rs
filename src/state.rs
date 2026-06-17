@@ -132,7 +132,9 @@ impl AppState {
         // 4. Model filter
         if !self.model_filter.is_empty() {
             filtered.retain(|c| {
-                self.model_filter.iter().any(|m_id| c.reviews.contains_key(m_id))
+                self.model_filter
+                    .iter()
+                    .any(|m_id| c.reviews.contains_key(m_id))
             });
         }
 

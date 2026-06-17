@@ -1,5 +1,3 @@
-use std::collections::HashMap;
-use std::io;
 use crossterm::event::{self, Event, KeyCode, KeyModifiers};
 use ratatui::{
     backend::Backend,
@@ -9,6 +7,8 @@ use ratatui::{
     widgets::{Block, Borders, Clear, Paragraph, Row, Table, TableState},
     Frame, Terminal,
 };
+use std::collections::HashMap;
+use std::io;
 
 use crate::git_ops::GitViewer;
 use crate::models::{CommitReview, ReviewMetadata, Severity, Status};
@@ -27,7 +27,10 @@ pub struct ContentViewerState {
 
 impl ContentViewerState {
     pub fn new(content: String, title: String, is_downstream_view: bool) -> Self {
-        let lines: Vec<String> = content.lines().map(|s| s.replace('\t', "        ")).collect();
+        let lines: Vec<String> = content
+            .lines()
+            .map(|s| s.replace('\t', "        "))
+            .collect();
         let mut commit_info = HashMap::new();
 
         // Heuristically parse commits from first 30 lines
@@ -64,7 +67,10 @@ impl ContentViewerState {
         is_downstream_view: bool,
         commit_info: HashMap<String, String>,
     ) -> Self {
-        let lines: Vec<String> = content.lines().map(|s| s.replace('\t', "        ")).collect();
+        let lines: Vec<String> = content
+            .lines()
+            .map(|s| s.replace('\t', "        "))
+            .collect();
         ContentViewerState {
             content,
             title,
@@ -117,6 +123,7 @@ pub enum ActiveDialog {
     SubjectSearch(SubjectSearchState),
     ModelToggle(ModelToggleState),
     BranchSwitch(BranchSwitchState),
+    Help,
 }
 
 pub struct TuiApp {
@@ -157,8 +164,13 @@ impl TuiApp {
             if event::poll(std::time::Duration::from_millis(100))? {
                 if let Event::Key(key) = event::read()? {
                     // Check quit first on global level (unless inside a search dialog typing 'q')
-                    let typing_search = matches!(self.active_dialog, ActiveDialog::SubjectSearch(_));
-                    if key.code == KeyCode::Char('q') && !typing_search && matches!(self.active_screen, ActiveScreen::MainTable) && matches!(self.active_dialog, ActiveDialog::None) {
+                    let typing_search =
+                        matches!(self.active_dialog, ActiveDialog::SubjectSearch(_));
+                    if key.code == KeyCode::Char('q')
+                        && !typing_search
+                        && matches!(self.active_screen, ActiveScreen::MainTable)
+                        && matches!(self.active_dialog, ActiveDialog::None)
+                    {
                         return Ok(());
                     }
 
@@ -196,7 +208,8 @@ impl TuiApp {
                         if s.selected_index == 0 {
                             self.state.author_filter = None;
                         } else {
-                            self.state.author_filter = Some(s.authors[s.selected_index - 1].clone());
+                            self.state.author_filter =
+                                Some(s.authors[s.selected_index - 1].clone());
                         }
                         self.state.apply_filters();
                         self.selected_row = 0;
@@ -275,7 +288,10 @@ impl TuiApp {
                         s.checked[s.selected_index] = !s.checked[s.selected_index];
                     }
                     KeyCode::Enter => {
-                        let new_visible: Vec<String> = s.models.iter().enumerate()
+                        let new_visible: Vec<String> = s
+                            .models
+                            .iter()
+                            .enumerate()
                             .filter(|&(idx, _)| s.checked[idx])
                             .map(|(_, id)| id.clone())
                             .collect();
@@ -324,6 +340,19 @@ impl TuiApp {
                 }
                 return false;
             }
+            ActiveDialog::Help => {
+                match key.code {
+                    KeyCode::Esc
+                    | KeyCode::Char('q')
+                    | KeyCode::Char('h')
+                    | KeyCode::Char('?')
+                    | KeyCode::Enter => {
+                        self.active_dialog = ActiveDialog::None;
+                    }
+                    _ => {}
+                }
+                return false;
+            }
             ActiveDialog::None => {}
         }
 
@@ -341,6 +370,7 @@ impl TuiApp {
             let mut show_suse = None;
             let mut show_upstream = None;
             let mut show_diff = None;
+            let mut show_help = false;
 
             match key.code {
                 KeyCode::Esc | KeyCode::Char('q') => {
@@ -390,11 +420,24 @@ impl TuiApp {
                         show_diff = Some((d, u));
                     }
                 }
-                KeyCode::Char('1') => { review_index = Some(0); }
-                KeyCode::Char('2') => { review_index = Some(1); }
-                KeyCode::Char('3') => { review_index = Some(2); }
-                KeyCode::Char('4') => { review_index = Some(3); }
-                KeyCode::Char('5') => { review_index = Some(4); }
+                KeyCode::Char('h') | KeyCode::Char('?') => {
+                    show_help = true;
+                }
+                KeyCode::Char('1') => {
+                    review_index = Some(0);
+                }
+                KeyCode::Char('2') => {
+                    review_index = Some(1);
+                }
+                KeyCode::Char('3') => {
+                    review_index = Some(2);
+                }
+                KeyCode::Char('4') => {
+                    review_index = Some(3);
+                }
+                KeyCode::Char('5') => {
+                    review_index = Some(4);
+                }
                 _ => {}
             }
 
@@ -407,48 +450,57 @@ impl TuiApp {
             } else if let Some(sha) = show_downstream {
                 if let Ok(content) = self.git_viewer.show_downstream(&sha) {
                     self.screen_history.push(self.active_screen.clone());
-                    self.active_screen = ActiveScreen::ContentViewer(ContentViewerState::new_with_info(
-                        content,
-                        format!("Downstream Commit: {}", &sha[..12]),
-                        true,
-                        s.commit_info.clone(),
-                    ));
+                    self.active_screen =
+                        ActiveScreen::ContentViewer(ContentViewerState::new_with_info(
+                            content,
+                            format!("Downstream Commit: {}", &sha[..12]),
+                            true,
+                            s.commit_info.clone(),
+                        ));
                 }
             } else if let Some(sha) = show_suse {
                 if let Ok(content) = self.git_viewer.show_suse(&sha) {
                     self.screen_history.push(self.active_screen.clone());
-                    self.active_screen = ActiveScreen::ContentViewer(ContentViewerState::new_with_info(
-                        content,
-                        format!("SUSE Commit: {}", &sha[..12]),
-                        false,
-                        s.commit_info.clone(),
-                    ));
+                    self.active_screen =
+                        ActiveScreen::ContentViewer(ContentViewerState::new_with_info(
+                            content,
+                            format!("SUSE Commit: {}", &sha[..12]),
+                            false,
+                            s.commit_info.clone(),
+                        ));
                 }
             } else if let Some(sha) = show_upstream {
                 if let Ok(content) = self.git_viewer.show_upstream(&sha) {
                     self.screen_history.push(self.active_screen.clone());
-                    self.active_screen = ActiveScreen::ContentViewer(ContentViewerState::new_with_info(
-                        content,
-                        format!("Upstream Commit: {}", &sha[..12]),
-                        false,
-                        s.commit_info.clone(),
-                    ));
+                    self.active_screen =
+                        ActiveScreen::ContentViewer(ContentViewerState::new_with_info(
+                            content,
+                            format!("Upstream Commit: {}", &sha[..12]),
+                            false,
+                            s.commit_info.clone(),
+                        ));
                 }
             } else if let Some((d_sha, u_sha)) = show_diff {
-                if let Ok(content) = self.git_viewer.diff_downstream_upstream(&d_sha, Some(&u_sha)) {
+                if let Ok(content) = self
+                    .git_viewer
+                    .diff_downstream_upstream(&d_sha, Some(&u_sha))
+                {
                     self.screen_history.push(self.active_screen.clone());
-                    self.active_screen = ActiveScreen::ContentViewer(ContentViewerState::new_with_info(
-                        content,
-                        format!("Diff: {} vs {}", &d_sha[..12], &u_sha[..12]),
-                        false,
-                        s.commit_info.clone(),
-                    ));
+                    self.active_screen =
+                        ActiveScreen::ContentViewer(ContentViewerState::new_with_info(
+                            content,
+                            format!("Diff: {} vs {}", &d_sha[..12], &u_sha[..12]),
+                            false,
+                            s.commit_info.clone(),
+                        ));
                 }
             } else if let Some(idx) = review_index {
                 if let Some(sha) = s.commit_info.get("downstream_sha").cloned() {
                     self.screen_history.push(self.active_screen.clone());
                     self.action_show_review_from_viewer_by_sha(&sha, idx);
                 }
+            } else if show_help {
+                self.active_dialog = ActiveDialog::Help;
             } else {
                 self.active_screen = ActiveScreen::ContentViewer(s);
             }
@@ -475,10 +527,11 @@ impl TuiApp {
                             return false;
                         }
                         KeyCode::Char('l') => {
-                            self.active_dialog = ActiveDialog::SeverityFilter(SeverityFilterState {
-                                options: vec!["All Issues", "Low+", "Medium+", "High"],
-                                selected_index: 0,
-                            });
+                            self.active_dialog =
+                                ActiveDialog::SeverityFilter(SeverityFilterState {
+                                    options: vec!["All Issues", "Low+", "Medium+", "High"],
+                                    selected_index: 0,
+                                });
                             return false;
                         }
                         KeyCode::Char('f') => {
@@ -493,7 +546,8 @@ impl TuiApp {
                             if let Ok(entries) = std::fs::read_dir(branches_dir) {
                                 for entry in entries.flatten() {
                                     if entry.path().is_dir() {
-                                        branches.push(entry.file_name().to_string_lossy().to_string());
+                                        branches
+                                            .push(entry.file_name().to_string_lossy().to_string());
                                     }
                                 }
                             }
@@ -629,11 +683,24 @@ impl TuiApp {
                             self.action_show_patches(&commit);
                         }
                     }
-                    KeyCode::Char('1') => { self.action_show_review_by_index(0); }
-                    KeyCode::Char('2') => { self.action_show_review_by_index(1); }
-                    KeyCode::Char('3') => { self.action_show_review_by_index(2); }
-                    KeyCode::Char('4') => { self.action_show_review_by_index(3); }
-                    KeyCode::Char('5') => { self.action_show_review_by_index(4); }
+                    KeyCode::Char('1') => {
+                        self.action_show_review_by_index(0);
+                    }
+                    KeyCode::Char('2') => {
+                        self.action_show_review_by_index(1);
+                    }
+                    KeyCode::Char('3') => {
+                        self.action_show_review_by_index(2);
+                    }
+                    KeyCode::Char('4') => {
+                        self.action_show_review_by_index(3);
+                    }
+                    KeyCode::Char('5') => {
+                        self.action_show_review_by_index(4);
+                    }
+                    KeyCode::Char('h') | KeyCode::Char('?') => {
+                        self.active_dialog = ActiveDialog::Help;
+                    }
                     _ => {}
                 }
             }
@@ -673,20 +740,34 @@ impl TuiApp {
             let models_map = self.state.db.load_models();
             for (idx, model_id) in self.state.visible_models.iter().enumerate() {
                 if let Some(review) = commit.reviews.get(model_id) {
-                    let desc = models_map.get(model_id).map(|m| m.description.as_str()).unwrap_or(model_id.as_str());
+                    let desc = models_map
+                        .get(model_id)
+                        .map(|m| m.description.as_str())
+                        .unwrap_or(model_id.as_str());
                     let has_issues = review.issues_found > 0;
-                    
-                    let mut line_parts = vec![format!("@KEY[{}]@ {}: {} issues", idx + 1, desc, review.issues_found)];
+
+                    let mut line_parts = vec![format!(
+                        "@KEY[{}]@ {}: {} issues",
+                        idx + 1,
+                        desc,
+                        review.issues_found
+                    )];
                     if review.has_pre_verification {
                         line_parts.push("(pre-verified)".to_string());
                     }
                     if review.findings_downstream_only > 0 {
-                        line_parts.push(format!("@BOLD_START@[{} downstream-only]@BOLD_END@", review.findings_downstream_only));
+                        line_parts.push(format!(
+                            "@BOLD_START@[{} downstream-only]@BOLD_END@",
+                            review.findings_downstream_only
+                        ));
                     }
                     if review.issue_severity_score != Severity::None {
-                        line_parts.push(format!("@BOLD_START@Severity: {}@BOLD_END@", review.issue_severity_score.as_str().to_uppercase()));
+                        line_parts.push(format!(
+                            "@BOLD_START@Severity: {}@BOLD_END@",
+                            review.issue_severity_score.as_str().to_uppercase()
+                        ));
                     }
-                    
+
                     let full_line = line_parts.join(" ");
                     if has_issues {
                         content_parts.push(format!("@BOLD_START@{}@BOLD_END@\n", full_line));
@@ -785,25 +866,32 @@ impl TuiApp {
             commit_info.insert("upstream_sha".to_string(), upstream.clone());
         }
 
-        match self.git_viewer.diff_downstream_upstream(&commit.sha, commit.upstream_commit.as_deref()) {
+        match self
+            .git_viewer
+            .diff_downstream_upstream(&commit.sha, commit.upstream_commit.as_deref())
+        {
             Ok(content) => {
-                let u_title = commit.upstream_commit.as_ref().map(|s| {
-                    if s.len() > 12 { &s[..12] } else { s }
-                }).unwrap_or("");
-                self.active_screen = ActiveScreen::ContentViewer(ContentViewerState::new_with_info(
-                    content,
-                    format!("Diff: {} vs {}", &commit.sha[..12], u_title),
-                    false,
-                    commit_info,
-                ));
+                let u_title = commit
+                    .upstream_commit
+                    .as_ref()
+                    .map(|s| if s.len() > 12 { &s[..12] } else { s })
+                    .unwrap_or("");
+                self.active_screen =
+                    ActiveScreen::ContentViewer(ContentViewerState::new_with_info(
+                        content,
+                        format!("Diff: {} vs {}", &commit.sha[..12], u_title),
+                        false,
+                        commit_info,
+                    ));
             }
             Err(e) => {
-                self.active_screen = ActiveScreen::ContentViewer(ContentViewerState::new_with_info(
-                    format!("Error: {}", e),
-                    "Diff View".to_string(),
-                    false,
-                    commit_info,
-                ));
+                self.active_screen =
+                    ActiveScreen::ContentViewer(ContentViewerState::new_with_info(
+                        format!("Error: {}", e),
+                        "Diff View".to_string(),
+                        false,
+                        commit_info,
+                    ));
             }
         }
     }
@@ -819,7 +907,11 @@ impl TuiApp {
         }
 
         if let Some(model_id) = model_with_patches {
-            if let Some(content) = self.state.db.get_review_content(model_id, &commit.sha, "review-fix-patches.diff") {
+            if let Some(content) =
+                self.state
+                    .db
+                    .get_review_content(model_id, &commit.sha, "review-fix-patches.diff")
+            {
                 self.active_screen = ActiveScreen::ContentViewer(ContentViewerState::new(
                     content,
                     format!("Fix Patches: {}", &commit.sha[..12]),
@@ -834,9 +926,16 @@ impl TuiApp {
         if index < self.state.visible_models.len() {
             let model_id = &self.state.visible_models[index];
             if commit.reviews.contains_key(model_id) {
-                if let Some(content) = self.state.db.get_review_content(model_id, &commit.sha, "review-inline.txt") {
+                if let Some(content) =
+                    self.state
+                        .db
+                        .get_review_content(model_id, &commit.sha, "review-inline.txt")
+                {
                     let models_map = self.state.db.load_models();
-                    let name = models_map.get(model_id).map(|m| m.description.as_str()).unwrap_or(model_id.as_str());
+                    let name = models_map
+                        .get(model_id)
+                        .map(|m| m.description.as_str())
+                        .unwrap_or(model_id.as_str());
                     self.active_screen = ActiveScreen::ContentViewer(ContentViewerState::new(
                         content,
                         format!("Review: {} - {}", name, &commit.sha[..12]),
@@ -862,9 +961,16 @@ impl TuiApp {
         if let Some(commit) = commit_opt {
             let model_id = &self.state.visible_models[index];
             if commit.reviews.contains_key(model_id) {
-                if let Some(content) = self.state.db.get_review_content(model_id, &commit.sha, "review-inline.txt") {
+                if let Some(content) =
+                    self.state
+                        .db
+                        .get_review_content(model_id, &commit.sha, "review-inline.txt")
+                {
                     let models_map = self.state.db.load_models();
-                    let name = models_map.get(model_id).map(|m| m.description.as_str()).unwrap_or(model_id.as_str());
+                    let name = models_map
+                        .get(model_id)
+                        .map(|m| m.description.as_str())
+                        .unwrap_or(model_id.as_str());
                     self.active_screen = ActiveScreen::ContentViewer(ContentViewerState::new(
                         content,
                         format!("Review: {} - {}", name, &commit.sha[..12]),
@@ -887,10 +993,26 @@ impl TuiApp {
             .split(f.size());
 
         // Header Title
-        let branch_name = self.state.current_branch.as_ref().map(|b| b.name.as_str()).unwrap_or("None");
+        let branch_name = self
+            .state
+            .current_branch
+            .as_ref()
+            .map(|b| b.name.as_str())
+            .unwrap_or("None");
         let title_line = Line::from(vec![
-            Span::styled(" KERNEL REVIEW ", Style::default().fg(Color::Black).bg(Color::Cyan).add_modifier(Modifier::BOLD)),
-            Span::styled(format!("  Branch: {}", branch_name), Style::default().fg(Color::White).add_modifier(Modifier::BOLD)),
+            Span::styled(
+                " KERNEL REVIEW ",
+                Style::default()
+                    .fg(Color::Black)
+                    .bg(Color::Cyan)
+                    .add_modifier(Modifier::BOLD),
+            ),
+            Span::styled(
+                format!("  Branch: {}", branch_name),
+                Style::default()
+                    .fg(Color::White)
+                    .add_modifier(Modifier::BOLD),
+            ),
         ]);
         let header = Paragraph::new(title_line).bg(Color::DarkGray);
         f.render_widget(header, chunks[0]);
@@ -906,7 +1028,9 @@ impl TuiApp {
         if !self.state.subject_filter.is_empty() {
             info_parts.push(format!("Search: \"{}\"", self.state.subject_filter));
         }
-        let subtitle = Paragraph::new(info_parts.join(" | ")).fg(Color::Yellow).bg(Color::Black);
+        let subtitle = Paragraph::new(info_parts.join(" | "))
+            .fg(Color::Yellow)
+            .bg(Color::Black);
         f.render_widget(subtitle, chunks[1]);
 
         // Draw active screen
@@ -922,13 +1046,15 @@ impl TuiApp {
         // Footer
         let footer_text = match self.active_screen {
             ActiveScreen::MainTable => {
-                "Enter: Cell Action | x: Toggle status | c: Downstream | k: SUSE | u: Upstream | d: Diff | 1-3: Review | Ctrl+A: Author | Ctrl+L: Severity | Ctrl+F: Search | Ctrl+B: Branch | m: Models | q: Quit"
+                "h/?: Help | Enter: Cell Action | x: Toggle status | c: Downstream | k: SUSE | u: Upstream | d: Diff | 1-3: Review | Ctrl+A: Author | Ctrl+L: Severity | Ctrl+F: Search | Ctrl+B: Branch | m: Models | q: Quit"
             }
             ActiveScreen::ContentViewer(_) => {
-                "Esc/q: Back | c: Downstream | k: SUSE | u: Upstream | d: Diff | 1-3: Review | Up/Down: Scroll"
+                "h/?: Help | Esc/q: Back | c: Downstream | k: SUSE | u: Upstream | d: Diff | 1-3: Review | Up/Down: Scroll"
             }
         };
-        let footer = Paragraph::new(footer_text).bg(Color::DarkGray).fg(Color::White);
+        let footer = Paragraph::new(footer_text)
+            .bg(Color::DarkGray)
+            .fg(Color::White);
         f.render_widget(footer, chunks[3]);
 
         // Draw Dialog if any is active
@@ -941,13 +1067,18 @@ impl TuiApp {
         let mut widths = vec![Constraint::Percentage(50)];
 
         for model_id in &self.state.visible_models {
-            let desc = models_map.get(model_id).map(|m| &m.description).unwrap_or(model_id);
+            let desc = models_map
+                .get(model_id)
+                .map(|m| &m.description)
+                .unwrap_or(model_id);
             let header_str = if desc.len() > 7 { &desc[..7] } else { desc };
             header_cells.push(CellFormat::header(header_str));
             widths.push(Constraint::Length(12));
         }
 
-        let header_row = Row::new(header_cells).height(1).style(Style::default().bg(Color::DarkGray));
+        let header_row = Row::new(header_cells)
+            .height(1)
+            .style(Style::default().bg(Color::DarkGray));
 
         let mut rows = Vec::new();
         for (row_idx, commit) in self.state.filtered_commits.iter().enumerate() {
@@ -969,13 +1100,14 @@ impl TuiApp {
                 subject.push_str("...");
             }
 
-            let mut spans = vec![
-                Span::raw(format!("{} ", status_emoji)),
-            ];
+            let mut spans = vec![Span::raw(format!("{} ", status_emoji))];
 
             let cell_selected = row_selected && self.selected_col == 0;
             let cell_style = if cell_selected {
-                Style::default().fg(Color::Black).bg(Color::Cyan).add_modifier(Modifier::BOLD)
+                Style::default()
+                    .fg(Color::Black)
+                    .bg(Color::Cyan)
+                    .add_modifier(Modifier::BOLD)
             } else if row_selected {
                 Style::default().bg(Color::Indexed(236))
             } else if has_issues {
@@ -991,7 +1123,12 @@ impl TuiApp {
             for (col_idx, model_id) in self.state.visible_models.iter().enumerate() {
                 let cell_col_selected = row_selected && self.selected_col == col_idx + 1;
                 if let Some(review) = commit.reviews.get(model_id) {
-                    let formatted = Self::format_review_cell(review, cell_col_selected, row_selected, has_issues);
+                    let formatted = Self::format_review_cell(
+                        review,
+                        cell_col_selected,
+                        row_selected,
+                        has_issues,
+                    );
                     row_cells.push(formatted);
                 } else {
                     let empty_style = if cell_col_selected {
@@ -1017,12 +1154,20 @@ impl TuiApp {
         f.render_stateful_widget(t, area, &mut self.table_state);
     }
 
-    fn format_review_cell(review: &ReviewMetadata, cell_selected: bool, row_selected: bool, has_issues: bool) -> Line<'static> {
+    fn format_review_cell(
+        review: &ReviewMetadata,
+        cell_selected: bool,
+        row_selected: bool,
+        has_issues: bool,
+    ) -> Line<'static> {
         let mut spans = Vec::new();
         let has_downstream_only = review.findings_downstream_only > 0;
 
         let base_style = if cell_selected {
-            Style::default().fg(Color::Black).bg(Color::Cyan).add_modifier(Modifier::BOLD)
+            Style::default()
+                .fg(Color::Black)
+                .bg(Color::Cyan)
+                .add_modifier(Modifier::BOLD)
         } else if row_selected {
             Style::default().bg(Color::Indexed(236))
         } else if has_issues {
@@ -1033,7 +1178,10 @@ impl TuiApp {
 
         // Issues count
         if review.issues_found > 0 {
-            spans.push(Span::styled(review.issues_found.to_string(), base_style.fg(Color::LightRed).add_modifier(Modifier::BOLD)));
+            spans.push(Span::styled(
+                review.issues_found.to_string(),
+                base_style.fg(Color::LightRed).add_modifier(Modifier::BOLD),
+            ));
         } else {
             spans.push(Span::styled("0", base_style));
         }
@@ -1045,7 +1193,10 @@ impl TuiApp {
 
         // Downstream only findings [N]
         if has_downstream_only {
-            spans.push(Span::styled(format!("[{}]", review.findings_downstream_only), base_style.fg(Color::LightBlue).add_modifier(Modifier::BOLD)));
+            spans.push(Span::styled(
+                format!("[{}]", review.findings_downstream_only),
+                base_style.fg(Color::LightBlue).add_modifier(Modifier::BOLD),
+            ));
         }
 
         // Severity
@@ -1063,7 +1214,10 @@ impl TuiApp {
                 Severity::High => Color::Red,
             };
             spans.push(Span::styled(" ", base_style));
-            spans.push(Span::styled(sev_str, base_style.fg(color).add_modifier(Modifier::BOLD)));
+            spans.push(Span::styled(
+                sev_str,
+                base_style.fg(color).add_modifier(Modifier::BOLD),
+            ));
         }
 
         Line::from(spans)
@@ -1073,7 +1227,12 @@ impl TuiApp {
         let mut spans = Vec::new();
 
         if line.starts_with("=== ") && line.ends_with(" ===") {
-            return Line::from(Span::styled(line.to_string(), Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD)));
+            return Line::from(Span::styled(
+                line.to_string(),
+                Style::default()
+                    .fg(Color::Yellow)
+                    .add_modifier(Modifier::BOLD),
+            ));
         }
 
         let mut remaining = line;
@@ -1090,7 +1249,9 @@ impl TuiApp {
                 if let Some(end_idx) = remaining.find("]@") {
                     let key = &remaining[5..end_idx];
                     let style = if bold_depth > 0 {
-                        Style::default().fg(Color::Cyan).add_modifier(Modifier::BOLD)
+                        Style::default()
+                            .fg(Color::Cyan)
+                            .add_modifier(Modifier::BOLD)
                     } else {
                         Style::default().fg(Color::Cyan)
                     };
@@ -1137,7 +1298,9 @@ impl TuiApp {
         }
 
         // Take lines fitting the viewport
-        let render_lines_with_indices = s.lines.iter()
+        let render_lines_with_indices = s
+            .lines
+            .iter()
             .enumerate()
             .skip(s.scroll_offset)
             .take(height - 2);
@@ -1146,19 +1309,33 @@ impl TuiApp {
             let is_line_diff = if s.is_downstream_view {
                 line_is_diff[idx]
             } else {
-                s.title.contains("Commit:") || s.title.contains("Patches:") || s.title.contains("Diff:")
+                s.title.contains("Commit:")
+                    || s.title.contains("Patches:")
+                    || s.title.contains("Diff:")
             };
 
             if is_line_diff {
                 // Highlight git diffs
                 if line.starts_with('+') && !line.starts_with("+++") {
-                    text_lines.push(Line::from(Span::styled(line.as_str().to_string(), Style::default().fg(Color::Green))));
+                    text_lines.push(Line::from(Span::styled(
+                        line.as_str().to_string(),
+                        Style::default().fg(Color::Green),
+                    )));
                 } else if line.starts_with('-') && !line.starts_with("---") {
-                    text_lines.push(Line::from(Span::styled(line.as_str().to_string(), Style::default().fg(Color::Red))));
+                    text_lines.push(Line::from(Span::styled(
+                        line.as_str().to_string(),
+                        Style::default().fg(Color::Red),
+                    )));
                 } else if line.starts_with("@@") {
-                    text_lines.push(Line::from(Span::styled(line.as_str().to_string(), Style::default().fg(Color::Cyan))));
+                    text_lines.push(Line::from(Span::styled(
+                        line.as_str().to_string(),
+                        Style::default().fg(Color::Cyan),
+                    )));
                 } else if line.starts_with("diff ") || line.starts_with("index ") {
-                    text_lines.push(Line::from(Span::styled(line.as_str().to_string(), Style::default().fg(Color::Magenta))));
+                    text_lines.push(Line::from(Span::styled(
+                        line.as_str().to_string(),
+                        Style::default().fg(Color::Magenta),
+                    )));
                 } else {
                     text_lines.push(Line::from(line.as_str()));
                 }
@@ -1185,7 +1362,11 @@ impl TuiApp {
                             Span::styled("> ", Style::default().fg(Color::DarkGray)),
                             Span::styled(rest.to_string(), Style::default().fg(Color::Cyan)),
                         ]));
-                    } else if rest_trimmed.starts_with("diff ") || rest_trimmed.starts_with("index ") || rest_trimmed.starts_with("---") || rest_trimmed.starts_with("+++") {
+                    } else if rest_trimmed.starts_with("diff ")
+                        || rest_trimmed.starts_with("index ")
+                        || rest_trimmed.starts_with("---")
+                        || rest_trimmed.starts_with("+++")
+                    {
                         text_lines.push(Line::from(vec![
                             Span::styled("> ", Style::default().fg(Color::DarkGray)),
                             Span::styled(rest.to_string(), Style::default().fg(Color::Magenta)),
@@ -1199,11 +1380,17 @@ impl TuiApp {
                 } else {
                     // Highlight metadata tags in reviews
                     let tags = [
-                        "suse-commit:", "Git-commit:", "Verified-against:",
-                        "Upstream-subject:", "Findings-in-upstream:",
-                        "Findings-downstream-only:", "Review-time:",
-                        "Review-model:", "Input-tokens:", "Output-tokens:",
-                        "Total-tokens:"
+                        "suse-commit:",
+                        "Git-commit:",
+                        "Verified-against:",
+                        "Upstream-subject:",
+                        "Findings-in-upstream:",
+                        "Findings-downstream-only:",
+                        "Review-time:",
+                        "Review-model:",
+                        "Input-tokens:",
+                        "Output-tokens:",
+                        "Total-tokens:",
                     ];
 
                     let mut matched_tag = None;
@@ -1220,23 +1407,53 @@ impl TuiApp {
 
                         let is_sha_tag = tag.contains("commit") || tag.contains("Verified");
                         let after_span = if is_sha_tag {
-                            Span::styled(after.to_string(), Style::default().fg(Color::LightBlue).add_modifier(Modifier::UNDERLINED).add_modifier(Modifier::BOLD))
+                            Span::styled(
+                                after.to_string(),
+                                Style::default()
+                                    .fg(Color::LightBlue)
+                                    .add_modifier(Modifier::UNDERLINED)
+                                    .add_modifier(Modifier::BOLD),
+                            )
                         } else {
-                            Span::styled(after.to_string(), Style::default().add_modifier(Modifier::BOLD))
+                            Span::styled(
+                                after.to_string(),
+                                Style::default().add_modifier(Modifier::BOLD),
+                            )
                         };
 
                         text_lines.push(Line::from(vec![
                             Span::raw(before.to_string()),
-                            Span::styled(tag.to_string(), Style::default().fg(Color::Cyan).add_modifier(Modifier::BOLD)),
+                            Span::styled(
+                                tag.to_string(),
+                                Style::default()
+                                    .fg(Color::Cyan)
+                                    .add_modifier(Modifier::BOLD),
+                            ),
                             after_span,
                         ]));
                     } else if line.starts_with("commit ") {
                         text_lines.push(Line::from(vec![
-                            Span::styled("commit ", Style::default().fg(Color::Cyan).add_modifier(Modifier::BOLD)),
-                            Span::styled((&line[7..]).to_string(), Style::default().fg(Color::LightBlue).add_modifier(Modifier::UNDERLINED).add_modifier(Modifier::BOLD)),
+                            Span::styled(
+                                "commit ",
+                                Style::default()
+                                    .fg(Color::Cyan)
+                                    .add_modifier(Modifier::BOLD),
+                            ),
+                            Span::styled(
+                                (&line[7..]).to_string(),
+                                Style::default()
+                                    .fg(Color::LightBlue)
+                                    .add_modifier(Modifier::UNDERLINED)
+                                    .add_modifier(Modifier::BOLD),
+                            ),
                         ]));
                     } else if line.starts_with("=== ") && line.ends_with(" ===") {
-                        text_lines.push(Line::from(Span::styled(line.as_str().to_string(), Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD))));
+                        text_lines.push(Line::from(Span::styled(
+                            line.as_str().to_string(),
+                            Style::default()
+                                .fg(Color::Yellow)
+                                .add_modifier(Modifier::BOLD),
+                        )));
                     } else {
                         text_lines.push(Line::from(line.as_str()));
                     }
@@ -1244,8 +1461,11 @@ impl TuiApp {
             }
         }
 
-        let p = Paragraph::new(text_lines)
-            .block(Block::default().borders(Borders::ALL).title(format!(" {} ", s.title)));
+        let p = Paragraph::new(text_lines).block(
+            Block::default()
+                .borders(Borders::ALL)
+                .title(format!(" {} ", s.title)),
+        );
         f.render_widget(p, area);
     }
 
@@ -1262,7 +1482,11 @@ impl TuiApp {
                 let mut list_lines = Vec::new();
                 // "All Authors" as the 0-th option
                 let all_selected = s.selected_index == 0;
-                let all_style = if all_selected { Style::default().fg(Color::Black).bg(Color::Cyan) } else { Style::default() };
+                let all_style = if all_selected {
+                    Style::default().fg(Color::Black).bg(Color::Cyan)
+                } else {
+                    Style::default()
+                };
                 list_lines.push(Line::from(Span::styled(" [All Authors] ", all_style)));
 
                 // Display authors matching scroll window
@@ -1270,13 +1494,20 @@ impl TuiApp {
                 for (idx, author) in render_authors.enumerate() {
                     let actual_idx = s.scroll_offset + idx + 1;
                     let selected = s.selected_index == actual_idx;
-                    let style = if selected { Style::default().fg(Color::Black).bg(Color::Cyan) } else { Style::default() };
+                    let style = if selected {
+                        Style::default().fg(Color::Black).bg(Color::Cyan)
+                    } else {
+                        Style::default()
+                    };
                     list_lines.push(Line::from(Span::styled(format!(" {} ", author), style)));
                 }
 
                 let current_filter = self.state.author_filter.as_deref().unwrap_or("All Authors");
-                let p = Paragraph::new(list_lines)
-                    .block(Block::default().borders(Borders::ALL).title(format!(" Filter by Author (Current: {}) ", current_filter)));
+                let p = Paragraph::new(list_lines).block(
+                    Block::default()
+                        .borders(Borders::ALL)
+                        .title(format!(" Filter by Author (Current: {}) ", current_filter)),
+                );
                 f.render_widget(p, area);
             }
             ActiveDialog::SeverityFilter(s) => {
@@ -1288,12 +1519,19 @@ impl TuiApp {
                 let mut list_lines = Vec::new();
                 for (idx, opt) in s.options.iter().enumerate() {
                     let selected = s.selected_index == idx;
-                    let style = if selected { Style::default().fg(Color::Black).bg(Color::Cyan) } else { Style::default() };
+                    let style = if selected {
+                        Style::default().fg(Color::Black).bg(Color::Cyan)
+                    } else {
+                        Style::default()
+                    };
                     list_lines.push(Line::from(Span::styled(format!(" {} ", opt), style)));
                 }
 
-                let p = Paragraph::new(list_lines)
-                    .block(Block::default().borders(Borders::ALL).title(" Filter by Severity "));
+                let p = Paragraph::new(list_lines).block(
+                    Block::default()
+                        .borders(Borders::ALL)
+                        .title(" Filter by Severity "),
+                );
                 f.render_widget(p, area);
             }
             ActiveDialog::SubjectSearch(s) => {
@@ -1303,11 +1541,21 @@ impl TuiApp {
                 f.render_widget(Clear, area);
 
                 let p = Paragraph::new(vec![
-                    Line::from(Span::styled(&s.input_value, Style::default().fg(Color::Yellow))),
+                    Line::from(Span::styled(
+                        &s.input_value,
+                        Style::default().fg(Color::Yellow),
+                    )),
                     Line::from(""),
-                    Line::from(Span::styled(" Press ENTER to search, ESC to cancel ", Style::default().fg(Color::DarkGray))),
+                    Line::from(Span::styled(
+                        " Press ENTER to search, ESC to cancel ",
+                        Style::default().fg(Color::DarkGray),
+                    )),
                 ])
-                .block(Block::default().borders(Borders::ALL).title(" Search Subject "));
+                .block(
+                    Block::default()
+                        .borders(Borders::ALL)
+                        .title(" Search Subject "),
+                );
                 f.render_widget(p, area);
             }
             ActiveDialog::ModelToggle(s) => {
@@ -1321,14 +1569,27 @@ impl TuiApp {
                     let selected = s.selected_index == idx;
                     let checked = s.checked[idx];
                     let prefix = if checked { "[x] " } else { "[ ] " };
-                    let style = if selected { Style::default().fg(Color::Black).bg(Color::Cyan) } else { Style::default() };
-                    list_lines.push(Line::from(Span::styled(format!("{}{}", prefix, desc), style)));
+                    let style = if selected {
+                        Style::default().fg(Color::Black).bg(Color::Cyan)
+                    } else {
+                        Style::default()
+                    };
+                    list_lines.push(Line::from(Span::styled(
+                        format!("{}{}", prefix, desc),
+                        style,
+                    )));
                 }
                 list_lines.push(Line::from(""));
-                list_lines.push(Line::from(Span::styled(" Space: Toggle  Enter: Apply  ESC: Cancel ", Style::default().fg(Color::DarkGray))));
+                list_lines.push(Line::from(Span::styled(
+                    " Space: Toggle  Enter: Apply  ESC: Cancel ",
+                    Style::default().fg(Color::DarkGray),
+                )));
 
-                let p = Paragraph::new(list_lines)
-                    .block(Block::default().borders(Borders::ALL).title(" Toggle Model Visibility "));
+                let p = Paragraph::new(list_lines).block(
+                    Block::default()
+                        .borders(Borders::ALL)
+                        .title(" Toggle Model Visibility "),
+                );
                 f.render_widget(p, area);
             }
             ActiveDialog::BranchSwitch(s) => {
@@ -1342,12 +1603,91 @@ impl TuiApp {
                 for (idx, branch) in render_branches.enumerate() {
                     let actual_idx = s.scroll_offset + idx;
                     let selected = s.selected_index == actual_idx;
-                    let style = if selected { Style::default().fg(Color::Black).bg(Color::Cyan) } else { Style::default() };
+                    let style = if selected {
+                        Style::default().fg(Color::Black).bg(Color::Cyan)
+                    } else {
+                        Style::default()
+                    };
                     list_lines.push(Line::from(Span::styled(format!(" {} ", branch), style)));
                 }
 
-                let p = Paragraph::new(list_lines)
-                    .block(Block::default().borders(Borders::ALL).title(" Switch Branch "));
+                let p = Paragraph::new(list_lines).block(
+                    Block::default()
+                        .borders(Borders::ALL)
+                        .title(" Switch Branch "),
+                );
+                f.render_widget(p, area);
+            }
+            ActiveDialog::Help => {
+                let size = f.size();
+                let width = 72.min(size.width.saturating_sub(2));
+                let height = 23.min(size.height.saturating_sub(2));
+                let area = centered_rect(width, height, size);
+
+                f.render_widget(Clear, area);
+
+                let mut list_lines = Vec::new();
+
+                // Single helper to add items (headers or bindings)
+                let mut add_item = |key: Option<&str>, val: &str| {
+                    if let Some(k) = key {
+                        list_lines.push(Line::from(vec![
+                            Span::styled(
+                                format!("  {:15}", k),
+                                Style::default()
+                                    .fg(Color::Yellow)
+                                    .add_modifier(Modifier::BOLD),
+                            ),
+                            Span::styled(" - ", Style::default().fg(Color::DarkGray)),
+                            Span::styled(val.to_string(), Style::default()),
+                        ]));
+                    } else {
+                        if !list_lines.is_empty() {
+                            list_lines.push(Line::from(""));
+                        }
+                        list_lines.push(Line::from(Span::styled(
+                            format!(" {} ", val),
+                            Style::default()
+                                .fg(Color::Black)
+                                .bg(Color::Cyan)
+                                .add_modifier(Modifier::BOLD),
+                        )));
+                    }
+                };
+
+                add_item(None, "Navigation & Views");
+                add_item(
+                    Some("Up/Dn, PgUp/Dn"),
+                    "Navigate commits (Table) / Scroll (Viewer)",
+                );
+                add_item(Some("Left / Right"), "Move column selection (Table)");
+                add_item(Some("Home / End"), "Jump to top / bottom");
+                add_item(Some("Enter"), "View commit (Col 0) / View model review");
+                add_item(Some("Esc / q"), "Go back to Main Table (Viewer)");
+
+                add_item(None, "Filtering & Configuration");
+                add_item(Some("Ctrl+A / L"), "Filter by Author / Severity level");
+                add_item(Some("Ctrl+F / B"), "Search commit subject / Switch branch");
+                add_item(Some("m"), "Toggle visible model columns");
+
+                add_item(None, "Actions & Commits");
+                add_item(Some("x"), "Toggle status (Unread -> Ok -> Bad)");
+                add_item(
+                    Some("c / k / u"),
+                    "View Downstream / SUSE / Upstream commit",
+                );
+                add_item(Some("d / p"), "Show diff (Down vs Up) / View patches");
+                add_item(Some("1 - 5"), "Show review for model 1, 2, 3, etc.");
+
+                add_item(None, "Global");
+                add_item(Some("h / ?"), "Toggle this help screen");
+                add_item(Some("q"), "Quit application (Table only)");
+
+                let p = Paragraph::new(list_lines).block(
+                    Block::default()
+                        .borders(Borders::ALL)
+                        .title(" Keyboard Shortcuts & Help "),
+                );
                 f.render_widget(p, area);
             }
             ActiveDialog::None => {}
@@ -1358,7 +1698,12 @@ impl TuiApp {
 struct CellFormat;
 impl CellFormat {
     fn header(txt: &str) -> Line<'static> {
-        Line::from(Span::styled(txt.to_string(), Style::default().fg(Color::White).add_modifier(Modifier::BOLD)))
+        Line::from(Span::styled(
+            txt.to_string(),
+            Style::default()
+                .fg(Color::White)
+                .add_modifier(Modifier::BOLD),
+        ))
     }
 }
 
@@ -1380,4 +1725,68 @@ fn centered_rect(percent_x: u16, percent_y: u16, r: Rect) -> Rect {
             Constraint::Length((r.width.saturating_sub(percent_x)) / 2),
         ])
         .split(popup_layout[1])[1]
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::config::Config;
+    use crate::state::AppState;
+    use crossterm::event::{KeyCode, KeyEvent, KeyEventKind, KeyEventState, KeyModifiers};
+    use std::path::PathBuf;
+
+    #[test]
+    fn test_help_dialog_activation_and_deactivation() {
+        let mut config = Config::default();
+        config.database_path = PathBuf::from("nonexistent_db_path_for_test");
+        let state = AppState::new(config);
+        let mut app = TuiApp::new(state);
+
+        // Initially active dialog should be None
+        assert!(matches!(app.active_dialog, ActiveDialog::None));
+
+        // Create key event for 'h'
+        let h_key = KeyEvent {
+            code: KeyCode::Char('h'),
+            modifiers: KeyModifiers::NONE,
+            kind: KeyEventKind::Press,
+            state: KeyEventState::empty(),
+        };
+
+        // Handle 'h' key
+        app.handle_key(h_key);
+
+        // Active dialog should now be Help
+        assert!(matches!(app.active_dialog, ActiveDialog::Help));
+
+        // Create key event for '?'
+        let question_key = KeyEvent {
+            code: KeyCode::Char('?'),
+            modifiers: KeyModifiers::NONE,
+            kind: KeyEventKind::Press,
+            state: KeyEventState::empty(),
+        };
+
+        // Handle '?' key to toggle / close
+        app.handle_key(question_key);
+
+        // Active dialog should now be None
+        assert!(matches!(app.active_dialog, ActiveDialog::None));
+
+        // Re-open with '?'
+        app.handle_key(question_key);
+        assert!(matches!(app.active_dialog, ActiveDialog::Help));
+
+        // Create key event for Esc
+        let esc_key = KeyEvent {
+            code: KeyCode::Esc,
+            modifiers: KeyModifiers::NONE,
+            kind: KeyEventKind::Press,
+            state: KeyEventState::empty(),
+        };
+
+        // Handle Esc key to close
+        app.handle_key(esc_key);
+        assert!(matches!(app.active_dialog, ActiveDialog::None));
+    }
 }

@@ -134,9 +134,15 @@ mod tests {
     #[test]
     fn test_expand_tilde() {
         std::env::set_var("HOME", "/custom/home");
-        assert_eq!(expand_tilde("~/test/path"), PathBuf::from("/custom/home/test/path"));
+        assert_eq!(
+            expand_tilde("~/test/path"),
+            PathBuf::from("/custom/home/test/path")
+        );
         assert_eq!(expand_tilde("~"), PathBuf::from("/custom/home"));
-        assert_eq!(expand_tilde("/regular/path"), PathBuf::from("/regular/path"));
+        assert_eq!(
+            expand_tilde("/regular/path"),
+            PathBuf::from("/regular/path")
+        );
     }
 
     #[test]

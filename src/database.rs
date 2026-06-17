@@ -23,7 +23,11 @@ impl ReviewDatabase {
             for entry in entries.flatten() {
                 let path = entry.path();
                 if path.is_dir() {
-                    let name = path.file_name().unwrap_or_default().to_string_lossy().into_owned();
+                    let name = path
+                        .file_name()
+                        .unwrap_or_default()
+                        .to_string_lossy()
+                        .into_owned();
                     if name != "branches" && !name.starts_with('.') {
                         let desc_file = path.join("description");
                         let description = if desc_file.exists() {
@@ -58,7 +62,10 @@ impl ReviewDatabase {
         // Read commit list
         let list_file = branch_dir.join("list");
         if !list_file.exists() {
-            return Err(format!("Branch commit list file not found: {:?}", list_file));
+            return Err(format!(
+                "Branch commit list file not found: {:?}",
+                list_file
+            ));
         }
 
         let list_content = fs::read_to_string(&list_file)
@@ -80,7 +87,11 @@ impl ReviewDatabase {
             for entry in entries.flatten() {
                 let path = entry.path();
                 if path.is_file() {
-                    let filename = path.file_name().unwrap_or_default().to_string_lossy().into_owned();
+                    let filename = path
+                        .file_name()
+                        .unwrap_or_default()
+                        .to_string_lossy()
+                        .into_owned();
                     if filename != "list" {
                         models.push(filename);
                     }
@@ -128,8 +139,10 @@ impl ReviewDatabase {
             if let Ok(pre_verif_content) = fs::read_to_string(pre_verif_file) {
                 if let Ok(val) = serde_json::from_str::<serde_json::Value>(&pre_verif_content) {
                     if let Some(suse_upstream) = val.get("suse_upstream_verification") {
-                        if let Some(downstream_only) = suse_upstream.get("findings_downstream_only") {
-                            metadata.findings_downstream_only = downstream_only.as_u64().unwrap_or(0) as u32;
+                        if let Some(downstream_only) = suse_upstream.get("findings_downstream_only")
+                        {
+                            metadata.findings_downstream_only =
+                                downstream_only.as_u64().unwrap_or(0) as u32;
                         }
                     }
                 }
@@ -144,7 +157,12 @@ impl ReviewDatabase {
             return None;
         }
         let prefix = &sha[0..2];
-        let file_path = self.db_path.join(model_id).join(prefix).join(sha).join(filename);
+        let file_path = self
+            .db_path
+            .join(model_id)
+            .join(prefix)
+            .join(sha)
+            .join(filename);
 
         if !file_path.exists() {
             return None;

@@ -20,6 +20,7 @@ A high-performance Terminal UI (TUI) program written in Rust for displaying and 
   - `Ctrl+B` Switch Database Branch
   - `m` Toggle Model Column visibility
 - **Backstack Navigation:** ESC or `q` pop you backward through your precise screen history (e.g., SUSE diff → Downstream diff → Review Table), preventing abrupt resets.
+- **Help Overlay:** Toggle an interactive help overlay screen globally at any time using the `h` or `?` key.
 - **Robust & Crash-proof:** Zero-panic Unicode-aware UTF-8 character boundary safe string truncation prevents panics when displaying commit subjects containing multi-byte characters.
 
 ---
@@ -40,6 +41,7 @@ A high-performance Terminal UI (TUI) program written in Rust for displaying and 
 | `d` | Show code-only diff between downstream and upstream commits |
 | `p` | Show AI fix patches (if available) |
 | `1` - `5` | Open review for model at column index 1-5 |
+| `h` / `?` | Toggle the Help Overlay screen |
 | `Ctrl+A` | Open **Author Filter** dialog |
 | `Ctrl+L` | Open **Severity Filter** dialog |
 | `Ctrl+F` | Open **Subject Search** dialog |
@@ -58,6 +60,7 @@ A high-performance Terminal UI (TUI) program written in Rust for displaying and 
 | `u` | Switch to upstream Linux commit details |
 | `d` | Switch to code-only diff between downstream and upstream commits |
 | `1` - `5` | Switch to inline review for model index 1-5 |
+| `h` / `?` | Toggle the Help Overlay screen |
 | `Esc` / `q` | Go back (restores previous screen in history) |
 
 ---

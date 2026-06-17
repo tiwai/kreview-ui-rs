@@ -42,7 +42,10 @@ struct Args {
     #[arg(long, help = "Filter commits by author name")]
     author: Option<String>,
 
-    #[arg(long, help = "Filter by minimum severity level (none, low, medium, high)")]
+    #[arg(
+        long,
+        help = "Filter by minimum severity level (none, low, medium, high)"
+    )]
     severity: Option<String>,
 
     #[arg(long, help = "Comma-separated list of models to show as columns")]
@@ -80,7 +83,10 @@ fn main() -> Result<(), Box<dyn Error>> {
 
     // 3. Validate database path
     if !config.database_path.exists() {
-        eprintln!("Error: Database directory not found at {:?}", config.database_path);
+        eprintln!(
+            "Error: Database directory not found at {:?}",
+            config.database_path
+        );
         std::process::exit(1);
     }
 
@@ -109,7 +115,10 @@ fn main() -> Result<(), Box<dyn Error>> {
             "medium" => Severity::Medium,
             "high" => Severity::High,
             _ => {
-                eprintln!("Error: Invalid severity level: {}. Must be none, low, medium, or high.", sev_str);
+                eprintln!(
+                    "Error: Invalid severity level: {}. Must be none, low, medium, or high.",
+                    sev_str
+                );
                 std::process::exit(1);
             }
         };
@@ -134,7 +143,10 @@ fn main() -> Result<(), Box<dyn Error>> {
         }
 
         if !unknown_models.is_empty() {
-            eprintln!("Warning: Unknown models will be ignored: {}", unknown_models.join(", "));
+            eprintln!(
+                "Warning: Unknown models will be ignored: {}",
+                unknown_models.join(", ")
+            );
         }
 
         if !valid_models.is_empty() {
@@ -157,10 +169,7 @@ fn main() -> Result<(), Box<dyn Error>> {
 
     // 8. Restore terminal
     disable_raw_mode()?;
-    execute!(
-        terminal.backend_mut(),
-        LeaveAlternateScreen
-    )?;
+    execute!(terminal.backend_mut(), LeaveAlternateScreen)?;
     terminal.show_cursor()?;
 
     if let Err(err) = run_result {

@@ -189,8 +189,16 @@ impl GitViewer {
                 }
 
                 let diff_text = String::from_utf8_lossy(&out.stdout);
-                let u_short = if upstream_sha.len() > 12 { &upstream_sha[..12] } else { upstream_sha };
-                let d_short = if downstream_sha.len() > 12 { &downstream_sha[..12] } else { downstream_sha };
+                let u_short = if upstream_sha.len() > 12 {
+                    &upstream_sha[..12]
+                } else {
+                    upstream_sha
+                };
+                let d_short = if downstream_sha.len() > 12 {
+                    &downstream_sha[..12]
+                } else {
+                    downstream_sha
+                };
                 let mut header = format!(
                     "Code diff: upstream {} vs downstream {}\n(showing only differences in code changes, commit log excluded)\n\n",
                     u_short, d_short
@@ -230,14 +238,24 @@ mod tests {
 
     #[test]
     fn test_diff_downstream_upstream_no_upstream_sha() {
-        let viewer = GitViewer::new(Some(PathBuf::from("/tmp")), None, Some(PathBuf::from("/tmp")));
+        let viewer = GitViewer::new(
+            Some(PathBuf::from("/tmp")),
+            None,
+            Some(PathBuf::from("/tmp")),
+        );
         let res = viewer.diff_downstream_upstream("sha1", None);
         assert!(res.is_err());
-        assert_eq!(res.unwrap_err(), "No upstream commit available for comparison");
+        assert_eq!(
+            res.unwrap_err(),
+            "No upstream commit available for comparison"
+        );
 
         let res2 = viewer.diff_downstream_upstream("sha1", Some("  "));
         assert!(res2.is_err());
-        assert_eq!(res2.unwrap_err(), "No upstream commit available for comparison");
+        assert_eq!(
+            res2.unwrap_err(),
+            "No upstream commit available for comparison"
+        );
     }
 
     #[test]
