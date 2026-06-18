@@ -1183,7 +1183,9 @@ impl TuiApp {
         let mut rows = Vec::new();
         for (row_idx, commit) in self.state.filtered_commits.iter().enumerate() {
             let row_selected = self.selected_row == row_idx;
-            let has_issues = commit.reviews.values().any(|r| r.issues_found > 0);
+            let has_issues = self.state.visible_models.iter().any(|model_id| {
+                commit.reviews.get(model_id).map(|r| r.issues_found > 0).unwrap_or(false)
+            });
 
             let status_emoji = match commit.status {
                 Status::Unread => "⚪",

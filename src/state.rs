@@ -114,12 +114,16 @@ impl AppState {
             filtered.retain(|c| c.author.to_lowercase().contains(&author_lower));
         }
 
-        // 2. Severity Filter (requires any model finding >= filter)
+        // 2. Severity Filter (requires any visible model finding >= filter)
         if let Some(ref min_severity) = self.severity_filter {
             filtered.retain(|c| {
-                c.reviews
-                    .values()
-                    .any(|r| r.issue_severity_score >= *min_severity)
+                self.visible_models.iter().any(|model_id| {
+                    if let Some(r) = c.reviews.get(model_id) {
+                        r.issue_severity_score >= *min_severity
+                    } else {
+                        false
+                    }
+                })
             });
         }
 
@@ -264,5 +268,87 @@ impl AppState {
         if marker_file.exists() {
             let _ = fs::remove_file(marker_file);
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::models::{ReviewMetadata, Severity};
+    use std::collections::HashMap;
+
+    #[test]
+    fn test_severity_filtering_visible_models_only() {
+        let mut config = Config::default();
+        config.database_path = std::path::PathBuf::from("nonexistent_db_path");
+        let mut state = AppState::new(config);
+
+        // Create reviews
+        let mut reviews = HashMap::new();
+        reviews.insert(
+            "qwen3.6".to_string(),
+            ReviewMetadata {
+                author: "test author".to_string(),
+                subject: "test subject".to_string(),
+                issues_found: 1,
+                issue_severity_score: Severity::Low,
+                issue_severity_explanation: String::new(),
+                sha: "test_sha".to_string(),
+                model: "qwen3.6".to_string(),
+                review_time_seconds: 0.0,
+                input_tokens: 0,
+                output_tokens: 0,
+                total_tokens: 0,
+                suse_commit: None,
+                upstream_commit: None,
+                has_pre_verification: false,
+                findings_downstream_only: 0,
+                has_fix_patches: false,
+            },
+        );
+        reviews.insert(
+            "gpt-oss".to_string(),
+            ReviewMetadata {
+                author: "test author".to_string(),
+                subject: "test subject".to_string(),
+                issues_found: 1,
+                issue_severity_score: Severity::High,
+                issue_severity_explanation: String::new(),
+                sha: "test_sha".to_string(),
+                model: "gpt-oss".to_string(),
+                review_time_seconds: 0.0,
+                input_tokens: 0,
+                output_tokens: 0,
+                total_tokens: 0,
+                suse_commit: None,
+                upstream_commit: None,
+                has_pre_verification: false,
+                findings_downstream_only: 0,
+                has_fix_patches: false,
+            },
+        );
+
+        let commit = CommitReview {
+            sha: "test_sha".to_string(),
+            subject: "test subject".to_string(),
+            author: "test author".to_string(),
+            suse_commit: None,
+            upstream_commit: None,
+            status: Status::Unread,
+            reviews,
+        };
+
+        state.commits = vec![commit];
+        state.severity_filter = Some(Severity::High);
+
+        // Case A: Only low-severity model is visible
+        state.visible_models = vec!["qwen3.6".to_string()];
+        state.apply_filters();
+        assert!(state.filtered_commits.is_empty(), "Commit should be filtered out because the high-severity model is invisible.");
+
+        // Case B: High-severity model is visible
+        state.visible_models = vec!["gpt-oss".to_string()];
+        state.apply_filters();
+        assert_eq!(state.filtered_commits.len(), 1, "Commit should be retained because the high-severity model is visible.");
     }
 }
