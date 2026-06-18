@@ -14,6 +14,93 @@ use crate::git_ops::GitViewer;
 use crate::models::{CommitReview, ReviewMetadata, Severity, Status};
 use crate::state::AppState;
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ColorTheme {
+    Dark,
+    Light,
+}
+
+#[allow(dead_code)]
+pub struct ThemeStyles {
+    pub header_bg: Color,
+    pub header_fg: Color,
+    pub selected_bg: Color,
+    pub selected_fg: Color,
+    pub selection_bg: Color,
+    pub unread_bg: Color,
+    pub subtitle_bg: Color,
+    pub subtitle_fg: Color,
+    pub help_key_fg: Color,
+    pub help_sep_fg: Color,
+    pub diff_add_fg: Color,
+    pub diff_del_fg: Color,
+    pub diff_hunk_fg: Color,
+    pub diff_meta_fg: Color,
+    pub sev_low: Color,
+    pub sev_med: Color,
+    pub sev_high: Color,
+    pub pre_verification_fg: Color,
+    pub findings_downstream_only_fg: Color,
+    pub issue_count_fg: Color,
+    pub default_text_fg: Color,
+    pub default_bg: Color,
+}
+
+impl ThemeStyles {
+    pub fn new(theme: ColorTheme) -> Self {
+        match theme {
+            ColorTheme::Dark => ThemeStyles {
+                header_bg: Color::DarkGray,
+                header_fg: Color::White,
+                selected_bg: Color::Cyan,
+                selected_fg: Color::Black,
+                selection_bg: Color::DarkGray,
+                unread_bg: Color::DarkGray,
+                subtitle_bg: Color::Black,
+                subtitle_fg: Color::Yellow,
+                help_key_fg: Color::Yellow,
+                help_sep_fg: Color::DarkGray,
+                diff_add_fg: Color::Green,
+                diff_del_fg: Color::Red,
+                diff_hunk_fg: Color::Cyan,
+                diff_meta_fg: Color::Magenta,
+                sev_low: Color::Yellow,
+                sev_med: Color::LightYellow,
+                sev_high: Color::Red,
+                pre_verification_fg: Color::Yellow,
+                findings_downstream_only_fg: Color::LightBlue,
+                issue_count_fg: Color::LightRed,
+                default_text_fg: Color::White,
+                default_bg: Color::Black,
+            },
+            ColorTheme::Light => ThemeStyles {
+                header_bg: Color::Gray,
+                header_fg: Color::Black,
+                selected_bg: Color::Cyan,
+                selected_fg: Color::Black,
+                selection_bg: Color::Gray,
+                unread_bg: Color::Gray,
+                subtitle_bg: Color::White,
+                subtitle_fg: Color::DarkGray,
+                help_key_fg: Color::Blue,
+                help_sep_fg: Color::DarkGray,
+                diff_add_fg: Color::Green,
+                diff_del_fg: Color::Red,
+                diff_hunk_fg: Color::Cyan,
+                diff_meta_fg: Color::Magenta,
+                sev_low: Color::Yellow,
+                sev_med: Color::LightRed,
+                sev_high: Color::Red,
+                pre_verification_fg: Color::Yellow,
+                findings_downstream_only_fg: Color::Blue,
+                issue_count_fg: Color::Red,
+                default_text_fg: Color::Black,
+                default_bg: Color::White,
+            },
+        }
+    }
+}
+
 #[allow(dead_code)]
 #[derive(Clone)]
 pub struct ContentViewerState {
@@ -154,6 +241,14 @@ impl TuiApp {
             selected_row: 0,
             selected_col: 0,
             table_state: TableState::default().with_selected(Some(0)),
+        }
+    }
+
+    pub fn theme(&self) -> ColorTheme {
+        if self.state.config.theme.to_lowercase().contains("light") {
+            ColorTheme::Light
+        } else {
+            ColorTheme::Dark
         }
     }
 
@@ -982,6 +1077,9 @@ impl TuiApp {
     }
 
     fn draw(&mut self, f: &mut Frame) {
+        let theme_type = self.theme();
+        let theme = ThemeStyles::new(theme_type);
+
         let chunks = Layout::default()
             .direction(Direction::Vertical)
             .constraints([
@@ -1003,18 +1101,18 @@ impl TuiApp {
             Span::styled(
                 " KERNEL REVIEW ",
                 Style::default()
-                    .fg(Color::Black)
-                    .bg(Color::Cyan)
+                    .fg(theme.selected_fg)
+                    .bg(theme.selected_bg)
                     .add_modifier(Modifier::BOLD),
             ),
             Span::styled(
                 format!("  Branch: {}", branch_name),
                 Style::default()
-                    .fg(Color::White)
+                    .fg(theme.header_fg)
                     .add_modifier(Modifier::BOLD),
             ),
         ]);
-        let header = Paragraph::new(title_line).bg(Color::DarkGray);
+        let header = Paragraph::new(title_line).bg(theme.header_bg);
         f.render_widget(header, chunks[0]);
 
         // Filters Subtitle
@@ -1029,8 +1127,8 @@ impl TuiApp {
             info_parts.push(format!("Search: \"{}\"", self.state.subject_filter));
         }
         let subtitle = Paragraph::new(info_parts.join(" | "))
-            .fg(Color::Yellow)
-            .bg(Color::Black);
+            .fg(theme.subtitle_fg)
+            .bg(theme.subtitle_bg);
         f.render_widget(subtitle, chunks[1]);
 
         // Draw active screen
@@ -1053,8 +1151,8 @@ impl TuiApp {
             }
         };
         let footer = Paragraph::new(footer_text)
-            .bg(Color::DarkGray)
-            .fg(Color::White);
+            .bg(theme.header_bg)
+            .fg(theme.header_fg);
         f.render_widget(footer, chunks[3]);
 
         // Draw Dialog if any is active
@@ -1062,8 +1160,10 @@ impl TuiApp {
     }
 
     fn draw_main_table(&mut self, f: &mut Frame, area: Rect) {
+        let theme_type = self.theme();
+        let theme = ThemeStyles::new(theme_type);
         let models_map = self.state.db.load_models();
-        let mut header_cells = vec![CellFormat::header("Subject")];
+        let mut header_cells = vec![CellFormat::header("Subject", theme.header_fg)];
         let mut widths = vec![Constraint::Percentage(50)];
 
         for model_id in &self.state.visible_models {
@@ -1072,13 +1172,13 @@ impl TuiApp {
                 .map(|m| &m.description)
                 .unwrap_or(model_id);
             let header_str = if desc.len() > 7 { &desc[..7] } else { desc };
-            header_cells.push(CellFormat::header(header_str));
+            header_cells.push(CellFormat::header(header_str, theme.header_fg));
             widths.push(Constraint::Length(12));
         }
 
         let header_row = Row::new(header_cells)
             .height(1)
-            .style(Style::default().bg(Color::DarkGray));
+            .style(Style::default().bg(theme.header_bg));
 
         let mut rows = Vec::new();
         for (row_idx, commit) in self.state.filtered_commits.iter().enumerate() {
@@ -1105,11 +1205,11 @@ impl TuiApp {
             let cell_selected = row_selected && self.selected_col == 0;
             let cell_style = if cell_selected {
                 Style::default()
-                    .fg(Color::Black)
-                    .bg(Color::Cyan)
+                    .fg(theme.selected_fg)
+                    .bg(theme.selected_bg)
                     .add_modifier(Modifier::BOLD)
             } else if row_selected {
-                Style::default().bg(Color::Indexed(236))
+                Style::default().bg(theme.selection_bg)
             } else if has_issues {
                 Style::default().add_modifier(Modifier::BOLD)
             } else {
@@ -1128,13 +1228,14 @@ impl TuiApp {
                         cell_col_selected,
                         row_selected,
                         has_issues,
+                        &theme,
                     );
                     row_cells.push(formatted);
                 } else {
                     let empty_style = if cell_col_selected {
-                        Style::default().fg(Color::Black).bg(Color::Cyan)
+                        Style::default().fg(theme.selected_fg).bg(theme.selected_bg)
                     } else if row_selected {
-                        Style::default().bg(Color::Indexed(236))
+                        Style::default().bg(theme.selection_bg)
                     } else {
                         Style::default()
                     };
@@ -1148,7 +1249,8 @@ impl TuiApp {
         let t = Table::new(rows, widths)
             .header(header_row)
             .block(Block::default().borders(Borders::ALL).title(" Commits "))
-            .highlight_style(Style::default().bg(Color::Indexed(236)))
+            .highlight_style(Style::default().bg(theme.selection_bg))
+            .style(Style::default().fg(theme.default_text_fg).bg(theme.default_bg))
             .column_spacing(1);
 
         f.render_stateful_widget(t, area, &mut self.table_state);
@@ -1159,17 +1261,18 @@ impl TuiApp {
         cell_selected: bool,
         row_selected: bool,
         has_issues: bool,
+        theme: &ThemeStyles,
     ) -> Line<'static> {
         let mut spans = Vec::new();
         let has_downstream_only = review.findings_downstream_only > 0;
 
         let base_style = if cell_selected {
             Style::default()
-                .fg(Color::Black)
-                .bg(Color::Cyan)
+                .fg(theme.selected_fg)
+                .bg(theme.selected_bg)
                 .add_modifier(Modifier::BOLD)
         } else if row_selected {
-            Style::default().bg(Color::Indexed(236))
+            Style::default().bg(theme.selection_bg)
         } else if has_issues {
             Style::default().add_modifier(Modifier::BOLD)
         } else {
@@ -1180,7 +1283,7 @@ impl TuiApp {
         if review.issues_found > 0 {
             spans.push(Span::styled(
                 review.issues_found.to_string(),
-                base_style.fg(Color::LightRed).add_modifier(Modifier::BOLD),
+                base_style.fg(theme.issue_count_fg).add_modifier(Modifier::BOLD),
             ));
         } else {
             spans.push(Span::styled("0", base_style));
@@ -1188,14 +1291,14 @@ impl TuiApp {
 
         // Pre-verification marker
         if review.has_pre_verification {
-            spans.push(Span::styled("*", base_style.fg(Color::Yellow)));
+            spans.push(Span::styled("*", base_style.fg(theme.pre_verification_fg)));
         }
 
         // Downstream only findings [N]
         if has_downstream_only {
             spans.push(Span::styled(
                 format!("[{}]", review.findings_downstream_only),
-                base_style.fg(Color::LightBlue).add_modifier(Modifier::BOLD),
+                base_style.fg(theme.findings_downstream_only_fg).add_modifier(Modifier::BOLD),
             ));
         }
 
@@ -1209,9 +1312,9 @@ impl TuiApp {
             };
             let color = match review.issue_severity_score {
                 Severity::None => Color::Reset,
-                Severity::Low => Color::Yellow,
-                Severity::Medium => Color::Indexed(208), // Orange
-                Severity::High => Color::Red,
+                Severity::Low => theme.sev_low,
+                Severity::Medium => theme.sev_med,
+                Severity::High => theme.sev_high,
             };
             spans.push(Span::styled(" ", base_style));
             spans.push(Span::styled(
@@ -1223,14 +1326,14 @@ impl TuiApp {
         Line::from(spans)
     }
 
-    fn parse_downstream_summary_line(line: &str) -> Line<'static> {
+    fn parse_downstream_summary_line(line: &str, theme: &ThemeStyles) -> Line<'static> {
         let mut spans = Vec::new();
 
         if line.starts_with("=== ") && line.ends_with(" ===") {
             return Line::from(Span::styled(
                 line.to_string(),
                 Style::default()
-                    .fg(Color::Yellow)
+                    .fg(theme.subtitle_fg)
                     .add_modifier(Modifier::BOLD),
             ));
         }
@@ -1250,10 +1353,10 @@ impl TuiApp {
                     let key = &remaining[5..end_idx];
                     let style = if bold_depth > 0 {
                         Style::default()
-                            .fg(Color::Cyan)
+                            .fg(theme.diff_hunk_fg)
                             .add_modifier(Modifier::BOLD)
                     } else {
-                        Style::default().fg(Color::Cyan)
+                        Style::default().fg(theme.diff_hunk_fg)
                     };
                     spans.push(Span::styled(format!("[{}]", key), style));
                     remaining = &remaining[end_idx + 2..];
@@ -1284,6 +1387,8 @@ impl TuiApp {
     }
 
     fn draw_content_viewer(&self, f: &mut Frame, area: Rect, s: &ContentViewerState) {
+        let theme_type = self.theme();
+        let theme = ThemeStyles::new(theme_type);
         let mut text_lines = Vec::new();
         let height = area.height as usize;
 
@@ -1319,29 +1424,29 @@ impl TuiApp {
                 if line.starts_with('+') && !line.starts_with("+++") {
                     text_lines.push(Line::from(Span::styled(
                         line.as_str().to_string(),
-                        Style::default().fg(Color::Green),
+                        Style::default().fg(theme.diff_add_fg),
                     )));
                 } else if line.starts_with('-') && !line.starts_with("---") {
                     text_lines.push(Line::from(Span::styled(
                         line.as_str().to_string(),
-                        Style::default().fg(Color::Red),
+                        Style::default().fg(theme.diff_del_fg),
                     )));
                 } else if line.starts_with("@@") {
                     text_lines.push(Line::from(Span::styled(
                         line.as_str().to_string(),
-                        Style::default().fg(Color::Cyan),
+                        Style::default().fg(theme.diff_hunk_fg),
                     )));
                 } else if line.starts_with("diff ") || line.starts_with("index ") {
                     text_lines.push(Line::from(Span::styled(
                         line.as_str().to_string(),
-                        Style::default().fg(Color::Magenta),
+                        Style::default().fg(theme.diff_meta_fg),
                     )));
                 } else {
                     text_lines.push(Line::from(line.as_str()));
                 }
             } else if s.is_downstream_view {
                 // Style as downstream summary using our tag parser
-                text_lines.push(Self::parse_downstream_summary_line(line));
+                text_lines.push(Self::parse_downstream_summary_line(line, &theme));
             } else {
                 if line.starts_with('>') {
                     let rest = if line.len() > 1 { &line[1..] } else { "" };
@@ -1349,18 +1454,18 @@ impl TuiApp {
 
                     if rest_trimmed.starts_with('+') && !rest_trimmed.starts_with("+++") {
                         text_lines.push(Line::from(vec![
-                            Span::styled("> ", Style::default().fg(Color::DarkGray)),
-                            Span::styled(rest.to_string(), Style::default().fg(Color::Green)),
+                            Span::styled("> ", Style::default().fg(theme.help_sep_fg)),
+                            Span::styled(rest.to_string(), Style::default().fg(theme.diff_add_fg)),
                         ]));
                     } else if rest_trimmed.starts_with('-') && !rest_trimmed.starts_with("---") {
                         text_lines.push(Line::from(vec![
-                            Span::styled("> ", Style::default().fg(Color::DarkGray)),
-                            Span::styled(rest.to_string(), Style::default().fg(Color::Red)),
+                            Span::styled("> ", Style::default().fg(theme.help_sep_fg)),
+                            Span::styled(rest.to_string(), Style::default().fg(theme.diff_del_fg)),
                         ]));
                     } else if rest_trimmed.starts_with("@@") {
                         text_lines.push(Line::from(vec![
-                            Span::styled("> ", Style::default().fg(Color::DarkGray)),
-                            Span::styled(rest.to_string(), Style::default().fg(Color::Cyan)),
+                            Span::styled("> ", Style::default().fg(theme.help_sep_fg)),
+                            Span::styled(rest.to_string(), Style::default().fg(theme.diff_hunk_fg)),
                         ]));
                     } else if rest_trimmed.starts_with("diff ")
                         || rest_trimmed.starts_with("index ")
@@ -1368,12 +1473,12 @@ impl TuiApp {
                         || rest_trimmed.starts_with("+++")
                     {
                         text_lines.push(Line::from(vec![
-                            Span::styled("> ", Style::default().fg(Color::DarkGray)),
-                            Span::styled(rest.to_string(), Style::default().fg(Color::Magenta)),
+                            Span::styled("> ", Style::default().fg(theme.help_sep_fg)),
+                            Span::styled(rest.to_string(), Style::default().fg(theme.diff_meta_fg)),
                         ]));
                     } else {
                         text_lines.push(Line::from(vec![
-                            Span::styled("> ", Style::default().fg(Color::DarkGray)),
+                            Span::styled("> ", Style::default().fg(theme.help_sep_fg)),
                             Span::raw(rest.to_string()),
                         ]));
                     }
@@ -1410,7 +1515,7 @@ impl TuiApp {
                             Span::styled(
                                 after.to_string(),
                                 Style::default()
-                                    .fg(Color::LightBlue)
+                                    .fg(theme.findings_downstream_only_fg)
                                     .add_modifier(Modifier::UNDERLINED)
                                     .add_modifier(Modifier::BOLD),
                             )
@@ -1426,7 +1531,7 @@ impl TuiApp {
                             Span::styled(
                                 tag.to_string(),
                                 Style::default()
-                                    .fg(Color::Cyan)
+                                    .fg(theme.diff_hunk_fg)
                                     .add_modifier(Modifier::BOLD),
                             ),
                             after_span,
@@ -1436,13 +1541,13 @@ impl TuiApp {
                             Span::styled(
                                 "commit ",
                                 Style::default()
-                                    .fg(Color::Cyan)
+                                    .fg(theme.diff_hunk_fg)
                                     .add_modifier(Modifier::BOLD),
                             ),
                             Span::styled(
                                 (&line[7..]).to_string(),
                                 Style::default()
-                                    .fg(Color::LightBlue)
+                                    .fg(theme.findings_downstream_only_fg)
                                     .add_modifier(Modifier::UNDERLINED)
                                     .add_modifier(Modifier::BOLD),
                             ),
@@ -1451,7 +1556,7 @@ impl TuiApp {
                         text_lines.push(Line::from(Span::styled(
                             line.as_str().to_string(),
                             Style::default()
-                                .fg(Color::Yellow)
+                                .fg(theme.subtitle_fg)
                                 .add_modifier(Modifier::BOLD),
                         )));
                     } else {
@@ -1461,15 +1566,20 @@ impl TuiApp {
             }
         }
 
-        let p = Paragraph::new(text_lines).block(
-            Block::default()
-                .borders(Borders::ALL)
-                .title(format!(" {} ", s.title)),
-        );
+        let p = Paragraph::new(text_lines)
+            .style(Style::default().fg(theme.default_text_fg).bg(theme.default_bg))
+            .block(
+                Block::default()
+                    .borders(Borders::ALL)
+                    .title(format!(" {} ", s.title)),
+            );
         f.render_widget(p, area);
     }
 
     fn draw_dialog(&self, f: &mut Frame) {
+        let theme_type = self.theme();
+        let theme = ThemeStyles::new(theme_type);
+
         match &self.active_dialog {
             ActiveDialog::AuthorFilter(s) => {
                 let size = f.size();
@@ -1483,7 +1593,7 @@ impl TuiApp {
                 // "All Authors" as the 0-th option
                 let all_selected = s.selected_index == 0;
                 let all_style = if all_selected {
-                    Style::default().fg(Color::Black).bg(Color::Cyan)
+                    Style::default().fg(theme.selected_fg).bg(theme.selected_bg)
                 } else {
                     Style::default()
                 };
@@ -1495,7 +1605,7 @@ impl TuiApp {
                     let actual_idx = s.scroll_offset + idx + 1;
                     let selected = s.selected_index == actual_idx;
                     let style = if selected {
-                        Style::default().fg(Color::Black).bg(Color::Cyan)
+                        Style::default().fg(theme.selected_fg).bg(theme.selected_bg)
                     } else {
                         Style::default()
                     };
@@ -1503,11 +1613,13 @@ impl TuiApp {
                 }
 
                 let current_filter = self.state.author_filter.as_deref().unwrap_or("All Authors");
-                let p = Paragraph::new(list_lines).block(
-                    Block::default()
-                        .borders(Borders::ALL)
-                        .title(format!(" Filter by Author (Current: {}) ", current_filter)),
-                );
+                let p = Paragraph::new(list_lines)
+                    .style(Style::default().fg(theme.default_text_fg).bg(theme.default_bg))
+                    .block(
+                        Block::default()
+                            .borders(Borders::ALL)
+                            .title(format!(" Filter by Author (Current: {}) ", current_filter)),
+                    );
                 f.render_widget(p, area);
             }
             ActiveDialog::SeverityFilter(s) => {
@@ -1520,18 +1632,20 @@ impl TuiApp {
                 for (idx, opt) in s.options.iter().enumerate() {
                     let selected = s.selected_index == idx;
                     let style = if selected {
-                        Style::default().fg(Color::Black).bg(Color::Cyan)
+                        Style::default().fg(theme.selected_fg).bg(theme.selected_bg)
                     } else {
                         Style::default()
                     };
                     list_lines.push(Line::from(Span::styled(format!(" {} ", opt), style)));
                 }
 
-                let p = Paragraph::new(list_lines).block(
-                    Block::default()
-                        .borders(Borders::ALL)
-                        .title(" Filter by Severity "),
-                );
+                let p = Paragraph::new(list_lines)
+                    .style(Style::default().fg(theme.default_text_fg).bg(theme.default_bg))
+                    .block(
+                        Block::default()
+                            .borders(Borders::ALL)
+                            .title(" Filter by Severity "),
+                    );
                 f.render_widget(p, area);
             }
             ActiveDialog::SubjectSearch(s) => {
@@ -1543,14 +1657,15 @@ impl TuiApp {
                 let p = Paragraph::new(vec![
                     Line::from(Span::styled(
                         &s.input_value,
-                        Style::default().fg(Color::Yellow),
+                        Style::default().fg(theme.subtitle_fg),
                     )),
                     Line::from(""),
                     Line::from(Span::styled(
                         " Press ENTER to search, ESC to cancel ",
-                        Style::default().fg(Color::DarkGray),
+                        Style::default().fg(theme.help_sep_fg),
                     )),
                 ])
+                .style(Style::default().fg(theme.default_text_fg).bg(theme.default_bg))
                 .block(
                     Block::default()
                         .borders(Borders::ALL)
@@ -1570,7 +1685,7 @@ impl TuiApp {
                     let checked = s.checked[idx];
                     let prefix = if checked { "[x] " } else { "[ ] " };
                     let style = if selected {
-                        Style::default().fg(Color::Black).bg(Color::Cyan)
+                        Style::default().fg(theme.selected_fg).bg(theme.selected_bg)
                     } else {
                         Style::default()
                     };
@@ -1582,14 +1697,16 @@ impl TuiApp {
                 list_lines.push(Line::from(""));
                 list_lines.push(Line::from(Span::styled(
                     " Space: Toggle  Enter: Apply  ESC: Cancel ",
-                    Style::default().fg(Color::DarkGray),
+                    Style::default().fg(theme.help_sep_fg),
                 )));
 
-                let p = Paragraph::new(list_lines).block(
-                    Block::default()
-                        .borders(Borders::ALL)
-                        .title(" Toggle Model Visibility "),
-                );
+                let p = Paragraph::new(list_lines)
+                    .style(Style::default().fg(theme.default_text_fg).bg(theme.default_bg))
+                    .block(
+                        Block::default()
+                            .borders(Borders::ALL)
+                            .title(" Toggle Model Visibility "),
+                    );
                 f.render_widget(p, area);
             }
             ActiveDialog::BranchSwitch(s) => {
@@ -1604,18 +1721,20 @@ impl TuiApp {
                     let actual_idx = s.scroll_offset + idx;
                     let selected = s.selected_index == actual_idx;
                     let style = if selected {
-                        Style::default().fg(Color::Black).bg(Color::Cyan)
+                        Style::default().fg(theme.selected_fg).bg(theme.selected_bg)
                     } else {
                         Style::default()
                     };
                     list_lines.push(Line::from(Span::styled(format!(" {} ", branch), style)));
                 }
 
-                let p = Paragraph::new(list_lines).block(
-                    Block::default()
-                        .borders(Borders::ALL)
-                        .title(" Switch Branch "),
-                );
+                let p = Paragraph::new(list_lines)
+                    .style(Style::default().fg(theme.default_text_fg).bg(theme.default_bg))
+                    .block(
+                        Block::default()
+                            .borders(Borders::ALL)
+                            .title(" Switch Branch "),
+                    );
                 f.render_widget(p, area);
             }
             ActiveDialog::Help => {
@@ -1635,10 +1754,10 @@ impl TuiApp {
                             Span::styled(
                                 format!("  {:15}", k),
                                 Style::default()
-                                    .fg(Color::Yellow)
+                                    .fg(theme.help_key_fg)
                                     .add_modifier(Modifier::BOLD),
                             ),
-                            Span::styled(" - ", Style::default().fg(Color::DarkGray)),
+                            Span::styled(" - ", Style::default().fg(theme.help_sep_fg)),
                             Span::styled(val.to_string(), Style::default()),
                         ]));
                     } else {
@@ -1648,8 +1767,8 @@ impl TuiApp {
                         list_lines.push(Line::from(Span::styled(
                             format!(" {} ", val),
                             Style::default()
-                                .fg(Color::Black)
-                                .bg(Color::Cyan)
+                                .fg(theme.selected_fg)
+                                .bg(theme.selected_bg)
                                 .add_modifier(Modifier::BOLD),
                         )));
                     }
@@ -1683,11 +1802,13 @@ impl TuiApp {
                 add_item(Some("h / ?"), "Toggle this help screen");
                 add_item(Some("q"), "Quit application (Table only)");
 
-                let p = Paragraph::new(list_lines).block(
-                    Block::default()
-                        .borders(Borders::ALL)
-                        .title(" Keyboard Shortcuts & Help "),
-                );
+                let p = Paragraph::new(list_lines)
+                    .style(Style::default().fg(theme.default_text_fg).bg(theme.default_bg))
+                    .block(
+                        Block::default()
+                            .borders(Borders::ALL)
+                            .title(" Keyboard Shortcuts & Help "),
+                    );
                 f.render_widget(p, area);
             }
             ActiveDialog::None => {}
@@ -1697,11 +1818,11 @@ impl TuiApp {
 
 struct CellFormat;
 impl CellFormat {
-    fn header(txt: &str) -> Line<'static> {
+    fn header(txt: &str, fg: Color) -> Line<'static> {
         Line::from(Span::styled(
             txt.to_string(),
             Style::default()
-                .fg(Color::White)
+                .fg(fg)
                 .add_modifier(Modifier::BOLD),
         ))
     }
@@ -1788,5 +1909,41 @@ mod tests {
         // Handle Esc key to close
         app.handle_key(esc_key);
         assert!(matches!(app.active_dialog, ActiveDialog::None));
+    }
+
+    #[test]
+    fn test_color_themes() {
+        // Test ThemeStyles configuration mapping
+        let dark_styles = ThemeStyles::new(ColorTheme::Dark);
+        assert_eq!(dark_styles.header_bg, Color::DarkGray);
+        assert_eq!(dark_styles.header_fg, Color::White);
+        assert_eq!(dark_styles.selected_bg, Color::Cyan);
+
+        let light_styles = ThemeStyles::new(ColorTheme::Light);
+        assert_eq!(light_styles.header_bg, Color::Gray);
+        assert_eq!(light_styles.header_fg, Color::Black);
+        assert_eq!(light_styles.selected_bg, Color::Cyan);
+
+        // Test theme querying via TuiApp config
+        let mut config = Config::default();
+        config.database_path = PathBuf::from("nonexistent_db_path_for_test");
+        config.theme = "ansi-light".to_string();
+        let state = AppState::new(config);
+        let app = TuiApp::new(state);
+        assert_eq!(app.theme(), ColorTheme::Light);
+
+        let mut config_light_only = Config::default();
+        config_light_only.database_path = PathBuf::from("nonexistent_db_path_for_test3");
+        config_light_only.theme = "light".to_string();
+        let state_light_only = AppState::new(config_light_only);
+        let app_light_only = TuiApp::new(state_light_only);
+        assert_eq!(app_light_only.theme(), ColorTheme::Light);
+
+        let mut config_dark = Config::default();
+        config_dark.database_path = PathBuf::from("nonexistent_db_path_for_test2");
+        config_dark.theme = "textual-dark".to_string();
+        let state_dark = AppState::new(config_dark);
+        let app_dark = TuiApp::new(state_dark);
+        assert_eq!(app_dark.theme(), ColorTheme::Dark);
     }
 }

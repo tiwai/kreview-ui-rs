@@ -12,7 +12,7 @@ A high-performance Terminal UI (TUI) program written in Rust for displaying and 
 - **Inline Review Highlighting:** Parses and styles quoted code segments starting with `>` inside review text blocks, preserving exact indentation, multiple spaces, and 8-character Linux kernel tab-alignments.
 - **Persistent Status Tracking:** Toggle status (`⚪ Unread` → `✅ OK` → `❌ Bad`) with persistent marker files stored securely. Existing notes inside status marker files are safely preserved.
 - **Diff View:** Compare downstream and upstream commits to see code differences (commit log excluded) via the `d` key.
-- **Multilayer Config Cascading:** Config values merge seamlessly: Command Line Args > Local `kreview-ui.json` > User `~/.config/kreview-ui.json` > System `/etc/kreview-ui.json` > Default values.
+- **Multilayer Config Cascading:** Config values merge seamlessly: Command Line Args (`--config <path>`) > User `~/.config/kreview-ui.json` > System `/etc/kreview-ui.json` > Default values.
 - **Keyboard-driven Dialog forms:**
   - `Ctrl+A` Filter by Author
   - `Ctrl+L` Filter by Severity level
@@ -82,6 +82,13 @@ The program loads configurations automatically. An example JSON structure:
 }
 ```
 
+### Theme Configuration
+The application supports both **Light** and **Dark** color themes based on the `"theme"` key:
+- If `"theme"` contains the word `"light"` (e.g., `"light"`, `"ansi-light"`), it will render with the high-contrast light theme (Soft White background with Soft Black text).
+- Otherwise, it defaults to the dark theme (Soft Charcoal Black background with Soft White text).
+
+Colors are rendered using standard 16 ANSI colors, guaranteeing absolute compatibility and accurate color/contrast mapping across all terminal emulators and configurations.
+
 ---
 
 ## Installation & Running
@@ -92,11 +99,14 @@ Ensure you have **Rust & Cargo** installed (Rust 1.70+ recommended).
 # Clone or navigate into the directory
 cd kreview-ui-rs
 
-# Run in debug mode (loads local kreview-ui.json by default)
+# Run in debug mode (loads global ~/.config/kreview-ui.json by default)
 cargo run
 
 # Run with custom command-line overrides
 cargo run -- --branch SLE12-SP5 --database /home/tiwai/tmp/kreviews/db
+
+# Run explicitly with a custom configuration file override
+cargo run -- --config ./kreview-ui.json
 
 # Build optimized production binary
 cargo build --release

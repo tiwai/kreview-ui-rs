@@ -53,13 +53,16 @@ struct Args {
 
     #[arg(long, help = "Directory for commit status markers")]
     markers_dir: Option<PathBuf>,
+
+    #[arg(long, help = "Path to custom configuration file")]
+    config: Option<PathBuf>,
 }
 
 fn main() -> Result<(), Box<dyn Error>> {
     let args = Args::parse();
 
     // 1. Load configuration
-    let mut config = Config::load();
+    let mut config = Config::load(args.config.as_deref());
 
     // 2. Override with CLI arguments
     if let Some(db) = args.database {

@@ -61,7 +61,7 @@ pub fn expand_tilde(path_str: &str) -> PathBuf {
 }
 
 impl Config {
-    pub fn load() -> Self {
+    pub fn load(custom_config_path: Option<&Path>) -> Self {
         let mut config = Config::default();
 
         // System config /etc/kreview-ui.json
@@ -86,13 +86,16 @@ impl Config {
             }
         }
 
-        // Local workspace kreview-ui.json (extremely useful for this workspace!)
-        let local_config = Path::new("kreview-ui.json");
-        if local_config.exists() {
-            if let Ok(content) = fs::read_to_string(local_config) {
-                if let Ok(json) = serde_json::from_str::<ConfigJson>(&content) {
-                    config.apply_json(json);
+        // Custom config file if explicitly provided
+        if let Some(custom_path) = custom_config_path {
+            if custom_path.exists() {
+                if let Ok(content) = fs::read_to_string(custom_path) {
+                    if let Ok(json) = serde_json::from_str::<ConfigJson>(&content) {
+                        config.apply_json(json);
+                    }
                 }
+            } else {
+                eprintln!("Warning: Config file not found at {:?}", custom_path);
             }
         }
 
@@ -158,5 +161,32 @@ mod tests {
         assert_eq!(config.default_branch, "TEST_BRANCH");
         assert_eq!(config.show_token_stats, false);
         assert_eq!(config.theme, "light");
+    }
+
+    #[test]
+    fn test_config_load() {
+        // Test loading with None (no crash, default/global config)
+        let config = Config::load(None);
+        assert_eq!(config.default_branch, "SLE12-SP3-TD");
+
+        // Test loading with a non-existent custom path (no crash)
+        let config_missing = Config::load(Some(Path::new("nonexistent-file.json")));
+        assert_eq!(config_missing.default_branch, "SLE12-SP3-TD");
+
+        // Test loading with an explicit file
+        let temp_dir = std::env::temp_dir();
+        let config_file_path = temp_dir.join("kreview-ui-test-config.json");
+        let content = r#"{
+            "default_branch": "TEST_LOAD_BRANCH",
+            "theme": "ansi-light"
+        }"#;
+        std::fs::write(&config_file_path, content).unwrap();
+
+        let config_loaded = Config::load(Some(&config_file_path));
+        assert_eq!(config_loaded.default_branch, "TEST_LOAD_BRANCH");
+        assert_eq!(config_loaded.theme, "ansi-light");
+
+        // Clean up
+        let _ = std::fs::remove_file(config_file_path);
     }
 }
