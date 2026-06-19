@@ -308,7 +308,7 @@ impl TuiApp {
                         }
                         self.state.apply_filters();
                         self.selected_row = 0;
-                        self.table_state.select(Some(0));
+                        self.validate_selection();
                         self.active_dialog = ActiveDialog::None;
                     }
                     _ => {}
@@ -339,7 +339,7 @@ impl TuiApp {
                         self.state.severity_filter = sev;
                         self.state.apply_filters();
                         self.selected_row = 0;
-                        self.table_state.select(Some(0));
+                        self.validate_selection();
                         self.active_dialog = ActiveDialog::None;
                     }
                     _ => {}
@@ -359,7 +359,7 @@ impl TuiApp {
                         self.state.subject_filter = s.input_value.clone();
                         self.state.apply_filters();
                         self.selected_row = 0;
-                        self.table_state.select(Some(0));
+                        self.validate_selection();
                         self.active_dialog = ActiveDialog::None;
                     }
                     _ => {}
@@ -395,6 +395,7 @@ impl TuiApp {
                             self.state.visible_models = new_visible;
                             self.state.apply_filters();
                             self.selected_col = 0;
+                            self.validate_selection();
                             self.active_dialog = ActiveDialog::None;
                         }
                     }
@@ -427,7 +428,7 @@ impl TuiApp {
                             let _ = self.state.load_branch(&selected_branch);
                             self.selected_row = 0;
                             self.selected_col = 0;
-                            self.table_state.select(Some(0));
+                            self.validate_selection();
                         }
                         self.active_dialog = ActiveDialog::None;
                     }
@@ -805,6 +806,26 @@ impl TuiApp {
         false
     }
 
+    pub fn validate_selection(&mut self) {
+        let max_row = self.state.filtered_commits.len();
+        if max_row == 0 {
+            self.selected_row = 0;
+            self.table_state.select(Some(0));
+        } else if self.selected_row >= max_row {
+            self.selected_row = max_row - 1;
+            self.table_state.select(Some(self.selected_row));
+        } else {
+            self.table_state.select(Some(self.selected_row));
+        }
+
+        let max_col = self.state.visible_models.len();
+        if max_col == 0 {
+            self.selected_col = 0;
+        } else if self.selected_col > max_col {
+            self.selected_col = max_col;
+        }
+    }
+
     fn get_selected_commit(&self) -> Option<CommitReview> {
         if self.state.filtered_commits.is_empty() {
             return None;
@@ -1077,6 +1098,7 @@ impl TuiApp {
     }
 
     fn draw(&mut self, f: &mut Frame) {
+        self.validate_selection();
         let theme_type = self.theme();
         let theme = ThemeStyles::new(theme_type);
 
@@ -1947,5 +1969,76 @@ mod tests {
         let state_dark = AppState::new(config_dark);
         let app_dark = TuiApp::new(state_dark);
         assert_eq!(app_dark.theme(), ColorTheme::Dark);
+    }
+
+    #[test]
+    fn test_selection_validation_on_filter_change() {
+        let mut config = Config::default();
+        config.database_path = PathBuf::from("nonexistent_db_path_for_test");
+        let mut state = AppState::new(config);
+
+        // Populate with some fake commits
+        let commits = vec![
+            CommitReview {
+                sha: "1111111111111111111111111111111111111111".to_string(),
+                subject: "Commit 1".to_string(),
+                author: "Author A".to_string(),
+                suse_commit: None,
+                upstream_commit: None,
+                reviews: std::collections::HashMap::new(),
+                status: Status::Unread,
+            },
+            CommitReview {
+                sha: "2222222222222222222222222222222222222222".to_string(),
+                subject: "Commit 2".to_string(),
+                author: "Author B".to_string(),
+                suse_commit: None,
+                upstream_commit: None,
+                reviews: std::collections::HashMap::new(),
+                status: Status::Unread,
+            },
+            CommitReview {
+                sha: "3333333333333333333333333333333333333333".to_string(),
+                subject: "Commit 3".to_string(),
+                author: "Author A".to_string(),
+                suse_commit: None,
+                upstream_commit: None,
+                reviews: std::collections::HashMap::new(),
+                status: Status::Unread,
+            },
+        ];
+
+        state.commits = commits.clone();
+        state.filtered_commits = commits;
+
+        let mut app = TuiApp::new(state);
+
+        // 1. Test standard selection bounds
+        app.selected_row = 2;
+        app.validate_selection();
+        assert_eq!(app.selected_row, 2);
+
+        // 2. Test selection out-of-bounds adjustment (clamping to max_row - 1)
+        // Simulate applying a filter that leaves only 1 commit
+        app.state.filtered_commits = vec![
+            CommitReview {
+                sha: "1111111111111111111111111111111111111111".to_string(),
+                subject: "Commit 1".to_string(),
+                author: "Author A".to_string(),
+                suse_commit: None,
+                upstream_commit: None,
+                reviews: std::collections::HashMap::new(),
+                status: Status::Unread,
+            },
+        ];
+
+        // Ensure validate_selection correctly clamps to index 0
+        app.validate_selection();
+        assert_eq!(app.selected_row, 0);
+
+        // 3. Test empty filtered list (should fall back to 0)
+        app.state.filtered_commits = vec![];
+        app.validate_selection();
+        assert_eq!(app.selected_row, 0);
     }
 }
