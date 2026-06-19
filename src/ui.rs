@@ -466,6 +466,7 @@ impl TuiApp {
             let mut show_suse = None;
             let mut show_upstream = None;
             let mut show_diff = None;
+            let mut show_patches: Option<(String, String)> = None;
             let mut show_help = false;
 
             match key.code {
@@ -514,6 +515,14 @@ impl TuiApp {
                     let u_sha = s.commit_info.get("upstream_sha").cloned();
                     if let (Some(d), Some(u)) = (d_sha, u_sha) {
                         show_diff = Some((d, u));
+                    }
+                }
+                KeyCode::Char('p') => {
+                    if let (Some(sha), Some(model_id)) = (
+                        s.commit_info.get("downstream_sha").cloned(),
+                        s.commit_info.get("model_id").cloned(),
+                    ) {
+                        show_patches = Some((sha, model_id));
                     }
                 }
                 KeyCode::Char('h') | KeyCode::Char('?') => {
@@ -589,6 +598,11 @@ impl TuiApp {
                             false,
                             s.commit_info.clone(),
                         ));
+                }
+            } else if let Some((sha, model_id)) = show_patches {
+                let commit_opt = self.state.commits.iter().find(|c| c.sha == sha).cloned();
+                if let Some(commit) = commit_opt {
+                    self.action_show_patches_for_model(&commit, &model_id);
                 }
             } else if let Some(idx) = review_index {
                 if let Some(sha) = s.commit_info.get("downstream_sha").cloned() {
@@ -774,11 +788,6 @@ impl TuiApp {
                             self.action_show_diff(&commit);
                         }
                     }
-                    KeyCode::Char('p') => {
-                        if let Some(commit) = self.get_selected_commit() {
-                            self.action_show_patches(&commit);
-                        }
-                    }
                     KeyCode::Char('1') => {
                         self.action_show_review_by_index(0);
                     }
@@ -854,7 +863,9 @@ impl TuiApp {
         if !commit.reviews.is_empty() {
             content_parts.push("\n=== Review Results ===\n".to_string());
             let models_map = self.state.db.load_models();
-            for (idx, model_id) in self.state.visible_models.iter().enumerate() {
+            let mut sorted_models: Vec<String> = commit.reviews.keys().cloned().collect();
+            sorted_models.sort();
+            for model_id in &sorted_models {
                 if let Some(review) = commit.reviews.get(model_id) {
                     let desc = models_map
                         .get(model_id)
@@ -862,12 +873,21 @@ impl TuiApp {
                         .unwrap_or(model_id.as_str());
                     let has_issues = review.issues_found > 0;
 
-                    let mut line_parts = vec![format!(
-                        "@KEY[{}]@ {}: {} issues",
-                        idx + 1,
-                        desc,
-                        review.issues_found
-                    )];
+                    let mut line_parts = Vec::new();
+                    if let Some(pos) = self.state.visible_models.iter().position(|m| m == model_id) {
+                        line_parts.push(format!(
+                            "@KEY[{}]@ {}: {} issues",
+                            pos + 1,
+                            desc,
+                            review.issues_found
+                        ));
+                    } else {
+                        line_parts.push(format!(
+                            "{}: {} issues",
+                            desc,
+                            review.issues_found
+                        ));
+                    }
                     if review.has_pre_verification {
                         line_parts.push("(pre-verified)".to_string());
                     }
@@ -882,6 +902,9 @@ impl TuiApp {
                             "@BOLD_START@Severity: {}@BOLD_END@",
                             review.issue_severity_score.as_str().to_uppercase()
                         ));
+                    }
+                    if review.has_fix_patches {
+                        line_parts.push("@BOLD_START@[patches available]@BOLD_END@".to_string());
                     }
 
                     let full_line = line_parts.join(" ");
@@ -1012,28 +1035,28 @@ impl TuiApp {
         }
     }
 
-    fn action_show_patches(&mut self, commit: &CommitReview) {
-        self.screen_history.clear();
-        let mut model_with_patches = None;
-        for (model_id, r) in &commit.reviews {
-            if r.has_fix_patches {
-                model_with_patches = Some(model_id);
-                break;
+    fn action_show_patches_for_model(&mut self, commit: &CommitReview, model_id: &str) {
+        if let Some(content) = self
+            .state
+            .db
+            .get_review_content(model_id, &commit.sha, "review-fix-patches.diff")
+        {
+            let mut commit_info = HashMap::new();
+            commit_info.insert("downstream_sha".to_string(), commit.sha.clone());
+            if let Some(ref suse) = commit.suse_commit {
+                commit_info.insert("suse_sha".to_string(), suse.clone());
             }
-        }
+            if let Some(ref upstream) = commit.upstream_commit {
+                commit_info.insert("upstream_sha".to_string(), upstream.clone());
+            }
+            commit_info.insert("model_id".to_string(), model_id.to_string());
 
-        if let Some(model_id) = model_with_patches {
-            if let Some(content) =
-                self.state
-                    .db
-                    .get_review_content(model_id, &commit.sha, "review-fix-patches.diff")
-            {
-                self.active_screen = ActiveScreen::ContentViewer(ContentViewerState::new(
-                    content,
-                    format!("Fix Patches: {}", &commit.sha[..12]),
-                    false,
-                ));
-            }
+            self.active_screen = ActiveScreen::ContentViewer(ContentViewerState::new_with_info(
+                content,
+                format!("Fix Patches: {}", &commit.sha[..12]),
+                false,
+                commit_info,
+            ));
         }
     }
 
@@ -1041,21 +1064,36 @@ impl TuiApp {
         self.screen_history.clear();
         if index < self.state.visible_models.len() {
             let model_id = &self.state.visible_models[index];
-            if commit.reviews.contains_key(model_id) {
-                if let Some(content) =
+            if let Some(review) = commit.reviews.get(model_id) {
+                if let Some(mut content) =
                     self.state
                         .db
                         .get_review_content(model_id, &commit.sha, "review-inline.txt")
                 {
+                    if review.has_fix_patches {
+                        content = format!("AI Fix Patches: AVAILABLE (Press 'p' to view)\n\n{}", content);
+                    }
                     let models_map = self.state.db.load_models();
                     let name = models_map
                         .get(model_id)
                         .map(|m| m.description.as_str())
                         .unwrap_or(model_id.as_str());
-                    self.active_screen = ActiveScreen::ContentViewer(ContentViewerState::new(
+
+                    let mut commit_info = HashMap::new();
+                    commit_info.insert("downstream_sha".to_string(), commit.sha.clone());
+                    commit_info.insert("model_id".to_string(), model_id.clone());
+                    if let Some(ref suse) = commit.suse_commit {
+                        commit_info.insert("suse_sha".to_string(), suse.clone());
+                    }
+                    if let Some(ref upstream) = commit.upstream_commit {
+                        commit_info.insert("upstream_sha".to_string(), upstream.clone());
+                    }
+
+                    self.active_screen = ActiveScreen::ContentViewer(ContentViewerState::new_with_info(
                         content,
                         format!("Review: {} - {}", name, &commit.sha[..12]),
                         false,
+                        commit_info,
                     ));
                 }
             }
@@ -1076,21 +1114,36 @@ impl TuiApp {
         let commit_opt = self.state.commits.iter().find(|c| c.sha == sha).cloned();
         if let Some(commit) = commit_opt {
             let model_id = &self.state.visible_models[index];
-            if commit.reviews.contains_key(model_id) {
-                if let Some(content) =
+            if let Some(review) = commit.reviews.get(model_id) {
+                if let Some(mut content) =
                     self.state
                         .db
                         .get_review_content(model_id, &commit.sha, "review-inline.txt")
                 {
+                    if review.has_fix_patches {
+                        content = format!("AI Fix Patches: AVAILABLE (Press 'p' to view)\n\n{}", content);
+                    }
                     let models_map = self.state.db.load_models();
                     let name = models_map
                         .get(model_id)
                         .map(|m| m.description.as_str())
                         .unwrap_or(model_id.as_str());
-                    self.active_screen = ActiveScreen::ContentViewer(ContentViewerState::new(
+
+                    let mut commit_info = HashMap::new();
+                    commit_info.insert("downstream_sha".to_string(), commit.sha.clone());
+                    commit_info.insert("model_id".to_string(), model_id.clone());
+                    if let Some(ref suse) = commit.suse_commit {
+                        commit_info.insert("suse_sha".to_string(), suse.clone());
+                    }
+                    if let Some(ref upstream) = commit.upstream_commit {
+                        commit_info.insert("upstream_sha".to_string(), upstream.clone());
+                    }
+
+                    self.active_screen = ActiveScreen::ContentViewer(ContentViewerState::new_with_info(
                         content,
                         format!("Review: {} - {}", name, &commit.sha[..12]),
                         false,
+                        commit_info,
                     ));
                 }
             }
@@ -1169,7 +1222,7 @@ impl TuiApp {
                 "h/?: Help | Enter: Cell Action | x: Toggle status | c: Downstream | s: SUSE | u: Upstream | d: Diff | 1-3: Review | Ctrl+A: Author | Ctrl+L: Severity | Ctrl+F: Search | Ctrl+B: Branch | m: Models | q: Quit"
             }
             ActiveScreen::ContentViewer(_) => {
-                "h/?: Help | Esc/q: Back | c: Downstream | s: SUSE | u: Upstream | d: Diff | 1-3: Review | Up/Down: Scroll"
+                "h/?: Help | Esc/q: Back | c: Downstream | s: SUSE | u: Upstream | d: Diff | p: Patches | 1-3: Review | Up/Down: Scroll"
             }
         };
         let footer = Paragraph::new(footer_text)
@@ -1344,6 +1397,14 @@ impl TuiApp {
             spans.push(Span::styled(
                 sev_str,
                 base_style.fg(color).add_modifier(Modifier::BOLD),
+            ));
+        }
+
+        // Patch availability in table cell
+        if review.has_fix_patches {
+            spans.push(Span::styled(
+                "+",
+                base_style.fg(Color::Green).add_modifier(Modifier::BOLD),
             ));
         }
 
@@ -1819,7 +1880,7 @@ impl TuiApp {
                     Some("c / s / u"),
                     "View Downstream / SUSE / Upstream commit",
                 );
-                add_item(Some("d / p"), "Show diff (Down vs Up) / View patches");
+                add_item(Some("d"), "Show diff (Down vs Up)");
                 add_item(Some("1 - 5"), "Show review for model 1, 2, 3, etc.");
 
                 add_item(None, "Global");
@@ -2040,5 +2101,61 @@ mod tests {
         app.state.filtered_commits = vec![];
         app.validate_selection();
         assert_eq!(app.selected_row, 0);
+    }
+
+    #[test]
+    fn test_patch_availability_displayed_in_downstream_view() {
+        let mut config = Config::default();
+        config.database_path = PathBuf::from("nonexistent_db_path_for_test");
+        let mut state = AppState::new(config);
+
+        let mut reviews = std::collections::HashMap::new();
+        reviews.insert(
+            "model_1".to_string(),
+            ReviewMetadata {
+                author: "Author A".to_string(),
+                subject: "Commit 1".to_string(),
+                issues_found: 2,
+                issue_severity_score: Severity::Low,
+                issue_severity_explanation: "None".to_string(),
+                sha: "1111111111111111111111111111111111111111".to_string(),
+                model: "model_1".to_string(),
+                review_time_seconds: 1.0,
+                input_tokens: 1,
+                output_tokens: 1,
+                total_tokens: 2,
+                suse_commit: None,
+                upstream_commit: None,
+                has_pre_verification: false,
+                findings_downstream_only: 0,
+                has_fix_patches: true,
+            },
+        );
+
+        let commit = CommitReview {
+            sha: "1111111111111111111111111111111111111111".to_string(),
+            subject: "Commit 1".to_string(),
+            author: "Author A".to_string(),
+            suse_commit: None,
+            upstream_commit: None,
+            reviews,
+            status: Status::Unread,
+        };
+
+        state.commits = vec![commit.clone()];
+        state.filtered_commits = vec![commit.clone()];
+        state.visible_models = vec!["model_1".to_string()];
+
+        let mut app = TuiApp::new(state);
+        app.action_show_downstream(&commit);
+
+        if let ActiveScreen::ContentViewer(s) = &app.active_screen {
+            assert!(
+                s.content.contains("[patches available]"),
+                "Downstream view content should contain '[patches available]' when a review has fix patches."
+            );
+        } else {
+            panic!("Expected ActiveScreen to be ContentViewer");
+        }
     }
 }
