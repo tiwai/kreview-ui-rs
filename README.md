@@ -12,6 +12,7 @@ A high-performance Terminal UI (TUI) program written in Rust for displaying and 
 - **Inline Review Highlighting:** Parses and styles quoted code segments starting with `>` inside review text blocks, preserving exact indentation, multiple spaces, and 8-character Linux kernel tab-alignments.
 - **Persistent Status Tracking:** Toggle status (`⚪ Unread` → `✅ OK` → `❌ Bad`) with persistent marker files stored securely. Existing notes inside status marker files are safely preserved.
 - **Diff View:** Compare downstream and upstream commits to see code differences (commit log excluded) via the `d` key.
+- **AI Fix Patches:** View AI-generated fix patches (indicated by a green `+` next to severity in the main table, and `[patches available]` in the downstream view) by pressing the `p` key inside the individual model review.
 - **Multilayer Config Cascading:** Config values merge seamlessly: Command Line Args (`--config <path>`) > User `~/.config/kreview-ui.json` > System `/etc/kreview-ui.json` > Default values.
 - **Keyboard-driven Dialog forms:**
   - `Ctrl+A` Filter by Author
@@ -39,7 +40,6 @@ A high-performance Terminal UI (TUI) program written in Rust for displaying and 
 | `s` | Show SUSE kernel-source commit details |
 | `u` | Show upstream Linux commit details |
 | `d` | Show code-only diff between downstream and upstream commits |
-| `p` | Show AI fix patches (if available) |
 | `1` - `5` | Open review for model at column index 1-5 |
 | `h` / `?` | Toggle the Help Overlay screen |
 | `Ctrl+A` | Open **Author Filter** dialog |
@@ -59,6 +59,7 @@ A high-performance Terminal UI (TUI) program written in Rust for displaying and 
 | `s` | Switch to SUSE kernel-source commit details |
 | `u` | Switch to upstream Linux commit details |
 | `d` | Switch to code-only diff between downstream and upstream commits |
+| `p` | Switch to AI fix patches (when viewing an individual model review if patches are available) |
 | `1` - `5` | Switch to inline review for model index 1-5 |
 | `h` / `?` | Toggle the Help Overlay screen |
 | `Esc` / `q` | Go back (restores previous screen in history) |
