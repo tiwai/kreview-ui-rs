@@ -4,7 +4,7 @@ use ratatui::{
     layout::{Constraint, Direction, Layout, Rect},
     style::{Color, Modifier, Style, Stylize},
     text::{Line, Span},
-    widgets::{Block, Borders, Clear, Paragraph, Row, Table, TableState},
+    widgets::{Block, Borders, Clear, Paragraph, Row, Table, TableState, Wrap},
     Frame, Terminal,
 };
 use std::collections::HashMap;
@@ -198,6 +198,13 @@ pub struct BranchSwitchState {
 }
 
 #[derive(Clone)]
+pub struct NoteInputState {
+    pub sha: String,
+    pub input_value: Vec<char>,
+    pub cursor_position: usize,
+}
+
+#[derive(Clone)]
 pub enum ActiveScreen {
     MainTable,
     ContentViewer(ContentViewerState),
@@ -211,6 +218,7 @@ pub enum ActiveDialog {
     ModelToggle(ModelToggleState),
     BranchSwitch(BranchSwitchState),
     Help,
+    NoteInput(NoteInputState),
 }
 
 pub struct TuiApp {
@@ -449,6 +457,64 @@ impl TuiApp {
                 }
                 return false;
             }
+            ActiveDialog::NoteInput(s) => {
+                if key.modifiers.contains(KeyModifiers::CONTROL) && (key.code == KeyCode::Enter || key.code == KeyCode::Char('s')) {
+                    let note_str: String = s.input_value.iter().collect();
+                    let _ = self.state.save_commit_note(&s.sha, &note_str);
+                    if let ActiveScreen::ContentViewer(ref mut cv) = self.active_screen {
+                        if let Some(sha) = cv.commit_info.get("downstream_sha").cloned() {
+                            if sha == s.sha {
+                                let commit_opt = self.state.commits.iter().find(|c| c.sha == sha).cloned();
+                                if let Some(commit) = commit_opt {
+                                    self.action_show_downstream(&commit);
+                                }
+                            }
+                        }
+                    }
+                    self.active_dialog = ActiveDialog::None;
+                } else {
+                    match key.code {
+                        KeyCode::Esc => self.active_dialog = ActiveDialog::None,
+                        KeyCode::Left => {
+                            if s.cursor_position > 0 {
+                                s.cursor_position -= 1;
+                            }
+                        }
+                        KeyCode::Right => {
+                            if s.cursor_position < s.input_value.len() {
+                                s.cursor_position += 1;
+                            }
+                        }
+                        KeyCode::Home => {
+                            s.cursor_position = 0;
+                        }
+                        KeyCode::End => {
+                            s.cursor_position = s.input_value.len();
+                        }
+                        KeyCode::Char(c) => {
+                            s.input_value.insert(s.cursor_position, c);
+                            s.cursor_position += 1;
+                        }
+                        KeyCode::Backspace => {
+                            if s.cursor_position > 0 {
+                                s.cursor_position -= 1;
+                                s.input_value.remove(s.cursor_position);
+                            }
+                        }
+                        KeyCode::Delete => {
+                            if s.cursor_position < s.input_value.len() {
+                                s.input_value.remove(s.cursor_position);
+                            }
+                        }
+                        KeyCode::Enter => {
+                            s.input_value.insert(s.cursor_position, '\n');
+                            s.cursor_position += 1;
+                        }
+                        _ => {}
+                    }
+                }
+                return false;
+            }
             ActiveDialog::None => {}
         }
 
@@ -468,6 +534,7 @@ impl TuiApp {
             let mut show_diff = None;
             let mut show_patches: Option<(String, String)> = None;
             let mut show_help = false;
+            let mut edit_note = false;
 
             match key.code {
                 KeyCode::Esc | KeyCode::Char('q') => {
@@ -543,6 +610,9 @@ impl TuiApp {
                 KeyCode::Char('5') => {
                     review_index = Some(4);
                 }
+                KeyCode::Char('n') => {
+                    edit_note = true;
+                }
                 _ => {}
             }
 
@@ -608,6 +678,17 @@ impl TuiApp {
                 if let Some(sha) = s.commit_info.get("downstream_sha").cloned() {
                     self.screen_history.push(self.active_screen.clone());
                     self.action_show_review_from_viewer_by_sha(&sha, idx);
+                }
+            } else if edit_note {
+                if let Some(sha) = s.commit_info.get("downstream_sha").cloned() {
+                    let existing_note = self.state.get_commit_note(&sha).unwrap_or_default();
+                    let chars: Vec<char> = existing_note.chars().collect();
+                    let len = chars.len();
+                    self.active_dialog = ActiveDialog::NoteInput(NoteInputState {
+                        sha,
+                        input_value: chars,
+                        cursor_position: len,
+                    });
                 }
             } else if show_help {
                 self.active_dialog = ActiveDialog::Help;
@@ -756,6 +837,18 @@ impl TuiApp {
                             self.state.set_commit_status(&commit.sha, next_status);
                         }
                     }
+                    KeyCode::Char('n') => {
+                        if let Some(commit) = self.get_selected_commit() {
+                            let existing_note = self.state.get_commit_note(&commit.sha).unwrap_or_default();
+                            let chars: Vec<char> = existing_note.chars().collect();
+                            let len = chars.len();
+                            self.active_dialog = ActiveDialog::NoteInput(NoteInputState {
+                                sha: commit.sha.clone(),
+                                input_value: chars,
+                                cursor_position: len,
+                            });
+                        }
+                    }
                     KeyCode::Enter => {
                         if let Some(commit) = self.get_selected_commit() {
                             if self.selected_col == 0 {
@@ -859,6 +952,10 @@ impl TuiApp {
             subject = subject[7..].trim().to_string();
         }
         content_parts.push(format!("{} {}\n", status_emoji, subject));
+
+        if let Some(note_text) = self.state.get_commit_note(&commit.sha) {
+            content_parts.push(format!("\n=== Note ===\n{}\n", note_text));
+        }
 
         if !commit.reviews.is_empty() {
             content_parts.push("\n=== Review Results ===\n".to_string());
@@ -1988,6 +2085,7 @@ impl TuiApp {
 
                 add_item(None, "Actions & Commits");
                 add_item(Some("x"), "Toggle status (Unread -> Ok -> Bad)");
+                add_item(Some("n"), "Add or edit commit note text");
                 add_item(
                     Some("c / s / u"),
                     "View Downstream / SUSE / Upstream commit",
@@ -2005,6 +2103,30 @@ impl TuiApp {
                         Block::default()
                             .borders(Borders::ALL)
                             .title(" Keyboard Shortcuts & Help "),
+                    );
+                f.render_widget(p, area);
+            }
+            ActiveDialog::NoteInput(s) => {
+                let size = f.size();
+                let area = centered_rect(70, 15, size);
+
+                f.render_widget(Clear, area);
+
+                let mut lines = render_note_text_with_cursor(&s.input_value, s.cursor_position, &theme);
+
+                lines.push(Line::from(""));
+                lines.push(Line::from(Span::styled(
+                    " Arrows: Move Cursor | Backspace/Del: Edit | Enter: Newline | Ctrl-S: Save | ESC: Cancel ",
+                    Style::default().fg(theme.help_sep_fg),
+                )));
+
+                let p = Paragraph::new(lines)
+                    .style(Style::default().fg(theme.default_text_fg).bg(theme.default_bg))
+                    .wrap(Wrap { trim: false })
+                    .block(
+                        Block::default()
+                            .borders(Borders::ALL)
+                            .title(format!(" Edit Note for Commit {} ", &s.sha[..12.min(s.sha.len())])),
                     );
                 f.render_widget(p, area);
             }
@@ -2043,6 +2165,61 @@ fn centered_rect(percent_x: u16, percent_y: u16, r: Rect) -> Rect {
             Constraint::Length((r.width.saturating_sub(percent_x)) / 2),
         ])
         .split(popup_layout[1])[1]
+}
+
+fn render_note_text_with_cursor(
+    input_value: &[char],
+    cursor_position: usize,
+    theme: &ThemeStyles,
+) -> Vec<Line<'static>> {
+    let mut lines = Vec::new();
+    let mut current_line_spans = Vec::new();
+
+    let total_len = input_value.len();
+    for i in 0..=total_len {
+        let is_cursor = i == cursor_position;
+
+        if i == total_len {
+            if is_cursor {
+                current_line_spans.push(Span::styled(
+                    "█",
+                    Style::default()
+                        .fg(theme.subtitle_fg)
+                        .bg(theme.default_bg),
+                ));
+            }
+            break;
+        }
+
+        let c = input_value[i];
+
+        if c == '\n' {
+            if is_cursor {
+                current_line_spans.push(Span::styled(
+                    " ",
+                    Style::default()
+                        .fg(theme.selected_fg)
+                        .bg(theme.selected_bg)
+                        .reversed(),
+                ));
+            }
+            lines.push(Line::from(current_line_spans));
+            current_line_spans = Vec::new();
+        } else {
+            let style = if is_cursor {
+                Style::default()
+                    .fg(theme.selected_fg)
+                    .bg(theme.selected_bg)
+                    .reversed()
+            } else {
+                Style::default().fg(theme.subtitle_fg)
+            };
+            current_line_spans.push(Span::styled(c.to_string(), style));
+        }
+    }
+
+    lines.push(Line::from(current_line_spans));
+    lines
 }
 
 #[cfg(test)]
@@ -2273,5 +2450,218 @@ mod tests {
         } else {
             panic!("Expected ActiveScreen to be ContentViewer");
         }
+    }
+
+    #[test]
+    fn test_note_dialog_activation_and_saving() {
+        let temp_dir = std::env::temp_dir();
+        let notes_dir = temp_dir.join("kreview-ui-test-notes-ui");
+        let _ = std::fs::remove_dir_all(&notes_dir);
+
+        let mut config = Config::default();
+        config.database_path = PathBuf::from("nonexistent_db_path_for_test");
+        config.notes_dir = notes_dir.clone();
+        let mut state = AppState::new(config);
+
+        let commit = CommitReview {
+            sha: "test_sha_notes_ui_1234567890".to_string(),
+            subject: "Test Commit".to_string(),
+            author: "Author A".to_string(),
+            suse_commit: None,
+            upstream_commit: None,
+            reviews: HashMap::new(),
+            status: Status::Unread,
+        };
+        state.commits = vec![commit.clone()];
+        state.filtered_commits = vec![commit.clone()];
+
+        let mut app = TuiApp::new(state);
+
+        assert!(matches!(app.active_dialog, ActiveDialog::None));
+
+        let n_key = KeyEvent {
+            code: KeyCode::Char('n'),
+            modifiers: KeyModifiers::NONE,
+            kind: KeyEventKind::Press,
+            state: KeyEventState::empty(),
+        };
+        app.handle_key(n_key);
+
+        if let ActiveDialog::NoteInput(s) = &app.active_dialog {
+            assert_eq!(s.sha, "test_sha_notes_ui_1234567890");
+            assert_eq!(s.input_value, Vec::<char>::new());
+            assert_eq!(s.cursor_position, 0);
+        } else {
+            panic!("Expected ActiveDialog to be NoteInput");
+        }
+
+        let a_key = KeyEvent {
+            code: KeyCode::Char('a'),
+            modifiers: KeyModifiers::NONE,
+            kind: KeyEventKind::Press,
+            state: KeyEventState::empty(),
+        };
+        app.handle_key(a_key);
+
+        let enter_key = KeyEvent {
+            code: KeyCode::Enter,
+            modifiers: KeyModifiers::NONE,
+            kind: KeyEventKind::Press,
+            state: KeyEventState::empty(),
+        };
+        app.handle_key(enter_key);
+
+        let b_key = KeyEvent {
+            code: KeyCode::Char('b'),
+            modifiers: KeyModifiers::NONE,
+            kind: KeyEventKind::Press,
+            state: KeyEventState::empty(),
+        };
+        app.handle_key(b_key);
+
+        if let ActiveDialog::NoteInput(s) = &app.active_dialog {
+            let note_str: String = s.input_value.iter().collect();
+            assert_eq!(note_str, "a\nb");
+            assert_eq!(s.cursor_position, 3);
+        } else {
+            panic!("Expected ActiveDialog to be NoteInput");
+        }
+
+        // Test cursor movement and middle insertion
+        let left_key = KeyEvent {
+            code: KeyCode::Left,
+            modifiers: KeyModifiers::NONE,
+            kind: KeyEventKind::Press,
+            state: KeyEventState::empty(),
+        };
+        app.handle_key(left_key); // cursor at index 2 (between '\n' and 'b')
+
+        let c_key = KeyEvent {
+            code: KeyCode::Char('c'),
+            modifiers: KeyModifiers::NONE,
+            kind: KeyEventKind::Press,
+            state: KeyEventState::empty(),
+        };
+        app.handle_key(c_key); // insert 'c' at index 2
+
+        if let ActiveDialog::NoteInput(s) = &app.active_dialog {
+            let note_str: String = s.input_value.iter().collect();
+            assert_eq!(note_str, "a\ncb");
+            assert_eq!(s.cursor_position, 3);
+        } else {
+            panic!("Expected ActiveDialog to be NoteInput");
+        }
+
+        // Backspace to delete the 'c' we just typed
+        let bs_key = KeyEvent {
+            code: KeyCode::Backspace,
+            modifiers: KeyModifiers::NONE,
+            kind: KeyEventKind::Press,
+            state: KeyEventState::empty(),
+        };
+        app.handle_key(bs_key);
+
+        if let ActiveDialog::NoteInput(s) = &app.active_dialog {
+            let note_str: String = s.input_value.iter().collect();
+            assert_eq!(note_str, "a\nb");
+            assert_eq!(s.cursor_position, 2);
+        } else {
+            panic!("Expected ActiveDialog to be NoteInput");
+        }
+
+        // Home key to move cursor to the very beginning
+        let home_key = KeyEvent {
+            code: KeyCode::Home,
+            modifiers: KeyModifiers::NONE,
+            kind: KeyEventKind::Press,
+            state: KeyEventState::empty(),
+        };
+        app.handle_key(home_key);
+
+        if let ActiveDialog::NoteInput(s) = &app.active_dialog {
+            assert_eq!(s.cursor_position, 0);
+        } else {
+            panic!("Expected ActiveDialog to be NoteInput");
+        }
+
+        // Delete key to delete 'a' at cursor position 0
+        let del_key = KeyEvent {
+            code: KeyCode::Delete,
+            modifiers: KeyModifiers::NONE,
+            kind: KeyEventKind::Press,
+            state: KeyEventState::empty(),
+        };
+        app.handle_key(del_key);
+
+        if let ActiveDialog::NoteInput(s) = &app.active_dialog {
+            let note_str: String = s.input_value.iter().collect();
+            assert_eq!(note_str, "\nb");
+            assert_eq!(s.cursor_position, 0);
+        } else {
+            panic!("Expected ActiveDialog to be NoteInput");
+        }
+
+        // End key to move to end
+        let end_key = KeyEvent {
+            code: KeyCode::End,
+            modifiers: KeyModifiers::NONE,
+            kind: KeyEventKind::Press,
+            state: KeyEventState::empty(),
+        };
+        app.handle_key(end_key);
+
+        if let ActiveDialog::NoteInput(s) = &app.active_dialog {
+            assert_eq!(s.cursor_position, 2);
+        } else {
+            panic!("Expected ActiveDialog to be NoteInput");
+        }
+
+        // Backspace to remove 'b'
+        app.handle_key(bs_key);
+
+        if let ActiveDialog::NoteInput(s) = &app.active_dialog {
+            let note_str: String = s.input_value.iter().collect();
+            assert_eq!(note_str, "\n");
+        } else {
+            panic!("Expected ActiveDialog to be NoteInput");
+        }
+
+        let d_key = KeyEvent {
+            code: KeyCode::Char('d'),
+            modifiers: KeyModifiers::NONE,
+            kind: KeyEventKind::Press,
+            state: KeyEventState::empty(),
+        };
+        app.handle_key(d_key);
+
+        if let ActiveDialog::NoteInput(s) = &app.active_dialog {
+            let note_str: String = s.input_value.iter().collect();
+            assert_eq!(note_str, "\nd");
+        } else {
+            panic!("Expected ActiveDialog to be NoteInput");
+        }
+
+        let ctrl_s_key = KeyEvent {
+            code: KeyCode::Char('s'),
+            modifiers: KeyModifiers::CONTROL,
+            kind: KeyEventKind::Press,
+            state: KeyEventState::empty(),
+        };
+        app.handle_key(ctrl_s_key);
+
+        assert!(matches!(app.active_dialog, ActiveDialog::None));
+
+        let note_text = app.state.get_commit_note("test_sha_notes_ui_1234567890").unwrap();
+        assert_eq!(note_text, "\nd");
+
+        app.action_show_downstream(&commit);
+        if let ActiveScreen::ContentViewer(s) = &app.active_screen {
+            assert!(s.content.contains("=== Note ==="));
+            assert!(s.content.contains("\nd"));
+        } else {
+            panic!("Expected ActiveScreen to be ContentViewer");
+        }
+
+        let _ = std::fs::remove_dir_all(&notes_dir);
     }
 }

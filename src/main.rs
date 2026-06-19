@@ -54,6 +54,9 @@ struct Args {
     #[arg(long, help = "Directory for commit status markers")]
     markers_dir: Option<PathBuf>,
 
+    #[arg(long, help = "Directory for commit note texts")]
+    notes_dir: Option<PathBuf>,
+
     #[arg(long, help = "Path to custom configuration file")]
     config: Option<PathBuf>,
 }
@@ -82,6 +85,9 @@ fn main() -> Result<(), Box<dyn Error>> {
     }
     if let Some(markers) = args.markers_dir {
         config.markers_dir = markers;
+    }
+    if let Some(notes) = args.notes_dir {
+        config.notes_dir = notes;
     }
 
     // 3. Validate database path

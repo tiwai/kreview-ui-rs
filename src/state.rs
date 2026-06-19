@@ -269,6 +269,37 @@ impl AppState {
             let _ = fs::remove_file(marker_file);
         }
     }
+
+    pub fn get_commit_note(&self, sha: &str) -> Option<String> {
+        if sha.len() < 2 {
+            return None;
+        }
+        let prefix = &sha[0..2];
+        let note_file = self.config.notes_dir.join(prefix).join(sha);
+        if note_file.exists() {
+            fs::read_to_string(&note_file).ok()
+        } else {
+            None
+        }
+    }
+
+    pub fn save_commit_note(&self, sha: &str, text: &str) -> std::io::Result<()> {
+        if sha.len() < 2 {
+            return Ok(());
+        }
+        let prefix = &sha[0..2];
+        let note_dir = self.config.notes_dir.join(prefix);
+        let note_file = note_dir.join(sha);
+        if text.trim().is_empty() {
+            if note_file.exists() {
+                let _ = fs::remove_file(note_file);
+            }
+        } else {
+            fs::create_dir_all(&note_dir)?;
+            fs::write(note_file, text)?;
+        }
+        Ok(())
+    }
 }
 
 #[cfg(test)]
@@ -350,5 +381,36 @@ mod tests {
         state.visible_models = vec!["gpt-oss".to_string()];
         state.apply_filters();
         assert_eq!(state.filtered_commits.len(), 1, "Commit should be retained because the high-severity model is visible.");
+    }
+
+    #[test]
+    fn test_save_and_get_commit_note() {
+        let temp_dir = std::env::temp_dir();
+        let notes_dir = temp_dir.join("kreview-ui-test-notes");
+        let _ = std::fs::remove_dir_all(&notes_dir);
+
+        let mut config = Config::default();
+        config.database_path = std::path::PathBuf::from("nonexistent_db_path");
+        config.notes_dir = notes_dir.clone();
+        let state = AppState::new(config);
+
+        let sha = "1234567890abcdef";
+        
+        // Initially, note should not exist
+        assert_eq!(state.get_commit_note(sha), None);
+
+        // Save a note
+        let note_text = "This is a test note for this commit.\nAwesome note!";
+        state.save_commit_note(sha, note_text).unwrap();
+
+        // Get the note and verify
+        assert_eq!(state.get_commit_note(sha), Some(note_text.to_string()));
+
+        // Save empty/whitespace note (should delete)
+        state.save_commit_note(sha, "   \n  ").unwrap();
+        assert_eq!(state.get_commit_note(sha), None);
+
+        // Clean up
+        let _ = std::fs::remove_dir_all(&notes_dir);
     }
 }

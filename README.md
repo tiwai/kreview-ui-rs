@@ -11,6 +11,7 @@ A high-performance Terminal UI (TUI) program written in Rust for displaying and 
 - **Standard Git Diff Highlighting:** Complete color-coded rendering of code additions (Green), deletions (Red), hunk boundaries (Cyan), and metadata/index headers (Magenta).
 - **Inline Review Highlighting:** Parses and styles quoted code segments starting with `>` inside review text blocks, preserving exact indentation, multiple spaces, and 8-character Linux kernel tab-alignments.
 - **Persistent Status Tracking:** Toggle status (`⚪ Unread` → `✅ OK` → `❌ Bad`) with persistent marker files stored securely. Existing notes inside status marker files are safely preserved.
+- **Commit Notes:** Write, edit, and view multi-line note texts for any commit. Notes are stored under a configurable notes directory (defaulting to `~/.local/kreview-ui/notes`) and are displayed prominently at the beginning of the commit view.
 - **Diff View:** Compare downstream and upstream commits to see code differences (commit log excluded) via the `d` key.
 - **AI Fix Patches:** View AI-generated fix patches (indicated by a green `+` next to severity in the main table, and `[patches available]` in the downstream view) by pressing the `p` key inside the individual model review.
 - **Multilayer Config Cascading:** Config values merge seamlessly: Command Line Args (`--config <path>`) > User `~/.config/kreview-ui.json` > System `/etc/kreview-ui.json` > Default values.
@@ -36,6 +37,7 @@ A high-performance Terminal UI (TUI) program written in Rust for displaying and 
 | `Home` / `End` | Jump to first / last row |
 | `Enter` | **Subject cell:** Open downstream view<br>**Model cell:** Open inline model review |
 | `x` | Toggle commit status (Unread → OK → Bad) |
+| `n` | Open Note Input dialog to add/edit notes for the selected commit |
 | `c` | Show downstream commit details |
 | `s` | Show SUSE kernel-source commit details |
 | `u` | Show upstream Linux commit details |
@@ -55,6 +57,7 @@ A high-performance Terminal UI (TUI) program written in Rust for displaying and 
 | `Up` / `Down` | Scroll 1 line up / down |
 | `PageUp` / `PageDown` | Scroll 15 lines up / down |
 | `Home` / `End` | Jump to top / bottom of content |
+| `n` | Open Note Input dialog to add/edit notes for the viewed commit |
 | `c` | Switch to downstream commit details |
 | `s` | Switch to SUSE kernel-source commit details |
 | `u` | Switch to upstream Linux commit details |
@@ -79,7 +82,8 @@ The program loads configurations automatically. An example JSON structure:
   "upstream_repo": "/home/tiwai/git/linus",
   "theme": "ansi-light",
   "show_token_stats": true,
-  "markers_dir": "/home/tiwai/.local/share/kreview-ui/markers"
+  "markers_dir": "/home/tiwai/.local/share/kreview-ui/markers",
+  "notes_dir": "/home/tiwai/.local/kreview-ui/notes"
 }
 ```
 

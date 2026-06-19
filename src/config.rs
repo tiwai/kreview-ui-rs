@@ -12,6 +12,7 @@ pub struct Config {
     pub theme: String,
     pub show_token_stats: bool,
     pub markers_dir: PathBuf,
+    pub notes_dir: PathBuf,
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize, Default)]
@@ -24,15 +25,21 @@ pub struct ConfigJson {
     pub theme: Option<String>,
     pub show_token_stats: Option<bool>,
     pub markers_dir: Option<String>,
+    pub notes_dir: Option<String>,
 }
 
 impl Default for Config {
     fn default() -> Self {
         let home_opt = std::env::var("HOME").ok();
-        let markers_dir = if let Some(home) = home_opt {
+        let markers_dir = if let Some(home) = home_opt.as_ref() {
             PathBuf::from(home).join(".local/share/kreview-ui/markers")
         } else {
             PathBuf::from(".local/share/kreview-ui/markers")
+        };
+        let notes_dir = if let Some(home) = home_opt.as_ref() {
+            PathBuf::from(home).join(".local/kreview-ui/notes")
+        } else {
+            PathBuf::from(".local/kreview-ui/notes")
         };
         Config {
             database_path: PathBuf::from("./kreviews"),
@@ -43,6 +50,7 @@ impl Default for Config {
             theme: "textual-dark".to_string(),
             show_token_stats: true,
             markers_dir,
+            notes_dir,
         }
     }
 }
@@ -127,6 +135,9 @@ impl Config {
         if let Some(markers) = json.markers_dir {
             self.markers_dir = expand_tilde(&markers);
         }
+        if let Some(notes) = json.notes_dir {
+            self.notes_dir = expand_tilde(&notes);
+        }
     }
 }
 
@@ -161,6 +172,17 @@ mod tests {
         assert_eq!(config.default_branch, "TEST_BRANCH");
         assert_eq!(config.show_token_stats, false);
         assert_eq!(config.theme, "light");
+    }
+
+    #[test]
+    fn test_config_notes_dir() {
+        let mut config = Config::default();
+        let json = ConfigJson {
+            notes_dir: Some("/some/custom/notes".to_string()),
+            ..Default::default()
+        };
+        config.apply_json(json);
+        assert_eq!(config.notes_dir, PathBuf::from("/some/custom/notes"));
     }
 
     #[test]
