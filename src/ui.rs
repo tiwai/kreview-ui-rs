@@ -865,55 +865,167 @@ impl TuiApp {
             let models_map = self.state.db.load_models();
             let mut sorted_models: Vec<String> = commit.reviews.keys().cloned().collect();
             sorted_models.sort();
+
+            struct ModelRow {
+                model_markup: String,
+                model_printed: String,
+                issues: String,
+                pre_verified: String,
+                downstream_only: String,
+                severity: String,
+                patches: String,
+                has_issues: bool,
+            }
+
+            let mut rows = Vec::new();
             for model_id in &sorted_models {
                 if let Some(review) = commit.reviews.get(model_id) {
                     let desc = models_map
                         .get(model_id)
                         .map(|m| m.description.as_str())
                         .unwrap_or(model_id.as_str());
+
+                    let (model_markup, model_printed) = if let Some(pos) = self.state.visible_models.iter().position(|m| m == model_id) {
+                        (
+                            format!("@KEY[{}]@ {}", pos + 1, desc),
+                            format!("[{}] {}", pos + 1, desc),
+                        )
+                    } else {
+                        (
+                            desc.to_string(),
+                            desc.to_string(),
+                        )
+                    };
+
+                    let issues = review.issues_found.to_string();
+                    let pre_verified = if review.has_pre_verification { "yes".to_string() } else { "-".to_string() };
+                    let downstream_only = review.findings_downstream_only.to_string();
+                    let severity = if review.issue_severity_score != Severity::None {
+                        review.issue_severity_score.as_str().to_uppercase()
+                    } else {
+                        "-".to_string()
+                    };
+                    let patches = if review.has_fix_patches { "yes".to_string() } else { "-".to_string() };
                     let has_issues = review.issues_found > 0;
 
-                    let mut line_parts = Vec::new();
-                    if let Some(pos) = self.state.visible_models.iter().position(|m| m == model_id) {
-                        line_parts.push(format!(
-                            "@KEY[{}]@ {}: {} issues",
-                            pos + 1,
-                            desc,
-                            review.issues_found
-                        ));
-                    } else {
-                        line_parts.push(format!(
-                            "{}: {} issues",
-                            desc,
-                            review.issues_found
-                        ));
-                    }
-                    if review.has_pre_verification {
-                        line_parts.push("(pre-verified)".to_string());
-                    }
-                    if review.findings_downstream_only > 0 {
-                        line_parts.push(format!(
-                            "@BOLD_START@[{} downstream-only]@BOLD_END@",
-                            review.findings_downstream_only
-                        ));
-                    }
-                    if review.issue_severity_score != Severity::None {
-                        line_parts.push(format!(
-                            "@BOLD_START@Severity: {}@BOLD_END@",
-                            review.issue_severity_score.as_str().to_uppercase()
-                        ));
-                    }
-                    if review.has_fix_patches {
-                        line_parts.push("@BOLD_START@[patches available]@BOLD_END@".to_string());
-                    }
-
-                    let full_line = line_parts.join(" ");
-                    if has_issues {
-                        content_parts.push(format!("@BOLD_START@{}@BOLD_END@\n", full_line));
-                    } else {
-                        content_parts.push(format!("{}\n", full_line));
-                    }
+                    rows.push(ModelRow {
+                        model_markup,
+                        model_printed,
+                        issues,
+                        pre_verified,
+                        downstream_only,
+                        severity,
+                        patches,
+                        has_issues,
+                    });
                 }
+            }
+
+            if !rows.is_empty() {
+                let h_model = "Model";
+                let h_issues = "Issues";
+                let h_pre_verify = "Pre-verify";
+                let h_downstream = "Downstream";
+                let h_severity = "Severity";
+                let h_patches = "Patches";
+
+                let mut w_model = h_model.len();
+                let mut w_issues = h_issues.len();
+                let mut w_pre_verify = h_pre_verify.len();
+                let mut w_downstream = h_downstream.len();
+                let mut w_severity = h_severity.len();
+                let mut w_patches = h_patches.len();
+
+                for r in &rows {
+                    w_model = w_model.max(r.model_printed.len());
+                    w_issues = w_issues.max(r.issues.len());
+                    w_pre_verify = w_pre_verify.max(r.pre_verified.len());
+                    w_downstream = w_downstream.max(r.downstream_only.len());
+                    w_severity = w_severity.max(r.severity.len());
+                    w_patches = w_patches.max(r.patches.len());
+                }
+
+                // Construct top border
+                let top_border = format!(
+                    "┌─{}─┬─{}─┬─{}─┬─{}─┬─{}─┬─{}─┐\n",
+                    "─".repeat(w_model),
+                    "─".repeat(w_issues),
+                    "─".repeat(w_pre_verify),
+                    "─".repeat(w_downstream),
+                    "─".repeat(w_severity),
+                    "─".repeat(w_patches)
+                );
+                content_parts.push(top_border);
+
+                // Construct header
+                let header_line = format!(
+                    "│ {:<w_model$} │ {:<w_issues$} │ {:<w_pre_verify$} │ {:<w_downstream$} │ {:<w_severity$} │ {:<w_patches$} │\n",
+                    h_model,
+                    h_issues,
+                    h_pre_verify,
+                    h_downstream,
+                    h_severity,
+                    h_patches,
+                    w_model = w_model,
+                    w_issues = w_issues,
+                    w_pre_verify = w_pre_verify,
+                    w_downstream = w_downstream,
+                    w_severity = w_severity,
+                    w_patches = w_patches
+                );
+                content_parts.push(header_line);
+
+                // Construct separator border
+                let sep_border = format!(
+                    "├─{}─┼─{}─┼─{}─┼─{}─┼─{}─┼─{}─┤\n",
+                    "─".repeat(w_model),
+                    "─".repeat(w_issues),
+                    "─".repeat(w_pre_verify),
+                    "─".repeat(w_downstream),
+                    "─".repeat(w_severity),
+                    "─".repeat(w_patches)
+                );
+                content_parts.push(sep_border);
+
+                // Construct rows
+                for r in &rows {
+                    let padding_spaces = " ".repeat(w_model - r.model_printed.len());
+                    let formatted_model = format!("{}{}", r.model_markup, padding_spaces);
+
+                    let row_line = format!(
+                        "│ {} │ {:<w_issues$} │ {:<w_pre_verify$} │ {:<w_downstream$} │ {:<w_severity$} │ {:<w_patches$} │\n",
+                        formatted_model,
+                        r.issues,
+                        r.pre_verified,
+                        r.downstream_only,
+                        r.severity,
+                        r.patches,
+                        w_issues = w_issues,
+                        w_pre_verify = w_pre_verify,
+                        w_downstream = w_downstream,
+                        w_severity = w_severity,
+                        w_patches = w_patches
+                    );
+
+                    let formatted_row = if r.has_issues {
+                        format!("@BOLD_START@{}@BOLD_END@", row_line)
+                    } else {
+                        row_line
+                    };
+                    content_parts.push(formatted_row);
+                }
+
+                // Construct bottom border
+                let bottom_border = format!(
+                    "└─{}─┴─{}─┴─{}─┴─{}─┴─{}─┴─{}─┘\n",
+                    "─".repeat(w_model),
+                    "─".repeat(w_issues),
+                    "─".repeat(w_pre_verify),
+                    "─".repeat(w_downstream),
+                    "─".repeat(w_severity),
+                    "─".repeat(w_patches)
+                );
+                content_parts.push(bottom_border);
             }
         }
 
@@ -2151,8 +2263,12 @@ mod tests {
 
         if let ActiveScreen::ContentViewer(s) = &app.active_screen {
             assert!(
-                s.content.contains("[patches available]"),
-                "Downstream view content should contain '[patches available]' when a review has fix patches."
+                s.content.contains("Patches"),
+                "Downstream view content should contain 'Patches' column header in the table."
+            );
+            assert!(
+                s.content.contains("yes"),
+                "Downstream view content should contain 'yes' in the Patches column when a review has fix patches."
             );
         } else {
             panic!("Expected ActiveScreen to be ContentViewer");
