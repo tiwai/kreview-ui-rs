@@ -59,6 +59,12 @@ struct Args {
 
     #[arg(long, help = "Path to custom configuration file")]
     config: Option<PathBuf>,
+
+    #[arg(
+        long,
+        help = "Color theme to use (e.g. textual-dark, ansi-light, etc.)"
+    )]
+    theme: Option<String>,
 }
 
 fn main() -> Result<(), Box<dyn Error>> {
@@ -88,6 +94,9 @@ fn main() -> Result<(), Box<dyn Error>> {
     }
     if let Some(notes) = args.notes_dir {
         config.notes_dir = notes;
+    }
+    if let Some(theme) = args.theme {
+        config.theme = theme;
     }
 
     // 3. Validate database path
@@ -186,4 +195,36 @@ fn main() -> Result<(), Box<dyn Error>> {
     }
 
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_args_theme() {
+        let args = Args::try_parse_from(["kreview-ui", "--theme", "custom-light"]).unwrap();
+        assert_eq!(args.theme, Some("custom-light".to_string()));
+    }
+
+    #[test]
+    fn test_args_database() {
+        let args = Args::try_parse_from(["kreview-ui", "--database", "/path/to/db"]).unwrap();
+        assert_eq!(args.database, Some(PathBuf::from("/path/to/db")));
+    }
+
+    #[test]
+    fn test_theme_override_logic() {
+        let mut config = Config {
+            theme: "textual-dark".to_string(),
+            ..Default::default()
+        };
+
+        let args = Args::try_parse_from(["kreview-ui", "--theme", "custom-light"]).unwrap();
+        if let Some(theme) = args.theme {
+            config.theme = theme;
+        }
+
+        assert_eq!(config.theme, "custom-light");
+    }
 }
