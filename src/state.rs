@@ -375,12 +375,19 @@ mod tests {
         // Case A: Only low-severity model is visible
         state.visible_models = vec!["qwen3.6".to_string()];
         state.apply_filters();
-        assert!(state.filtered_commits.is_empty(), "Commit should be filtered out because the high-severity model is invisible.");
+        assert!(
+            state.filtered_commits.is_empty(),
+            "Commit should be filtered out because the high-severity model is invisible."
+        );
 
         // Case B: High-severity model is visible
         state.visible_models = vec!["gpt-oss".to_string()];
         state.apply_filters();
-        assert_eq!(state.filtered_commits.len(), 1, "Commit should be retained because the high-severity model is visible.");
+        assert_eq!(
+            state.filtered_commits.len(),
+            1,
+            "Commit should be retained because the high-severity model is visible."
+        );
     }
 
     #[test]
@@ -395,7 +402,7 @@ mod tests {
         let state = AppState::new(config);
 
         let sha = "1234567890abcdef";
-        
+
         // Initially, note should not exist
         assert_eq!(state.get_commit_note(sha), None);
 

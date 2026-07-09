@@ -4,7 +4,7 @@ use ratatui::{
     layout::{Constraint, Direction, Layout, Rect},
     style::{Color, Modifier, Style, Stylize},
     text::{Line, Span},
-    widgets::{Block, Borders, Clear, Paragraph, Row, Table, TableState, Wrap},
+    widgets::{Block, Borders, Cell, Clear, Paragraph, Row, Table, TableState, Wrap},
     Frame, Terminal,
 };
 use std::collections::HashMap;
@@ -42,6 +42,7 @@ pub struct ThemeStyles {
     pub pre_verification_fg: Color,
     pub findings_downstream_only_fg: Color,
     pub issue_count_fg: Color,
+    pub issue_count_bg: Color,
     pub default_text_fg: Color,
     pub default_bg: Color,
 }
@@ -70,6 +71,7 @@ impl ThemeStyles {
                 pre_verification_fg: Color::Yellow,
                 findings_downstream_only_fg: Color::LightBlue,
                 issue_count_fg: Color::LightRed,
+                issue_count_bg: Color::Rgb(50, 20, 20),
                 default_text_fg: Color::White,
                 default_bg: Color::Black,
             },
@@ -94,6 +96,7 @@ impl ThemeStyles {
                 pre_verification_fg: Color::Yellow,
                 findings_downstream_only_fg: Color::Blue,
                 issue_count_fg: Color::Red,
+                issue_count_bg: Color::Rgb(255, 220, 220),
                 default_text_fg: Color::Black,
                 default_bg: Color::White,
             },
@@ -458,13 +461,16 @@ impl TuiApp {
                 return false;
             }
             ActiveDialog::NoteInput(s) => {
-                if key.modifiers.contains(KeyModifiers::CONTROL) && (key.code == KeyCode::Enter || key.code == KeyCode::Char('s')) {
+                if key.modifiers.contains(KeyModifiers::CONTROL)
+                    && (key.code == KeyCode::Enter || key.code == KeyCode::Char('s'))
+                {
                     let note_str: String = s.input_value.iter().collect();
                     let _ = self.state.save_commit_note(&s.sha, &note_str);
                     if let ActiveScreen::ContentViewer(ref mut cv) = self.active_screen {
                         if let Some(sha) = cv.commit_info.get("downstream_sha").cloned() {
                             if sha == s.sha {
-                                let commit_opt = self.state.commits.iter().find(|c| c.sha == sha).cloned();
+                                let commit_opt =
+                                    self.state.commits.iter().find(|c| c.sha == sha).cloned();
                                 if let Some(commit) = commit_opt {
                                     self.action_show_downstream(&commit);
                                 }
@@ -839,7 +845,8 @@ impl TuiApp {
                     }
                     KeyCode::Char('n') => {
                         if let Some(commit) = self.get_selected_commit() {
-                            let existing_note = self.state.get_commit_note(&commit.sha).unwrap_or_default();
+                            let existing_note =
+                                self.state.get_commit_note(&commit.sha).unwrap_or_default();
                             let chars: Vec<char> = existing_note.chars().collect();
                             let len = chars.len();
                             self.active_dialog = ActiveDialog::NoteInput(NoteInputState {
@@ -982,27 +989,34 @@ impl TuiApp {
                         .map(|m| m.description.as_str())
                         .unwrap_or(model_id.as_str());
 
-                    let (model_markup, model_printed) = if let Some(pos) = self.state.visible_models.iter().position(|m| m == model_id) {
+                    let (model_markup, model_printed) = if let Some(pos) =
+                        self.state.visible_models.iter().position(|m| m == model_id)
+                    {
                         (
                             format!("@KEY[{}]@ {}", pos + 1, desc),
                             format!("[{}] {}", pos + 1, desc),
                         )
                     } else {
-                        (
-                            desc.to_string(),
-                            desc.to_string(),
-                        )
+                        (desc.to_string(), desc.to_string())
                     };
 
                     let issues = review.issues_found.to_string();
-                    let pre_verified = if review.has_pre_verification { "yes".to_string() } else { "-".to_string() };
+                    let pre_verified = if review.has_pre_verification {
+                        "yes".to_string()
+                    } else {
+                        "-".to_string()
+                    };
                     let downstream_only = review.findings_downstream_only.to_string();
                     let severity = if review.issue_severity_score != Severity::None {
                         review.issue_severity_score.as_str().to_uppercase()
                     } else {
                         "-".to_string()
                     };
-                    let patches = if review.has_fix_patches { "yes".to_string() } else { "-".to_string() };
+                    let patches = if review.has_fix_patches {
+                        "yes".to_string()
+                    } else {
+                        "-".to_string()
+                    };
                     let has_issues = review.issues_found > 0;
 
                     rows.push(ModelRow {
@@ -1245,10 +1259,10 @@ impl TuiApp {
     }
 
     fn action_show_patches_for_model(&mut self, commit: &CommitReview, model_id: &str) {
-        if let Some(content) = self
-            .state
-            .db
-            .get_review_content(model_id, &commit.sha, "review-fix-patches.diff")
+        if let Some(content) =
+            self.state
+                .db
+                .get_review_content(model_id, &commit.sha, "review-fix-patches.diff")
         {
             let mut commit_info = HashMap::new();
             commit_info.insert("downstream_sha".to_string(), commit.sha.clone());
@@ -1280,7 +1294,10 @@ impl TuiApp {
                         .get_review_content(model_id, &commit.sha, "review-inline.txt")
                 {
                     if review.has_fix_patches {
-                        content = format!("AI Fix Patches: AVAILABLE (Press 'p' to view)\n\n{}", content);
+                        content = format!(
+                            "AI Fix Patches: AVAILABLE (Press 'p' to view)\n\n{}",
+                            content
+                        );
                     }
                     let models_map = self.state.db.load_models();
                     let name = models_map
@@ -1298,12 +1315,13 @@ impl TuiApp {
                         commit_info.insert("upstream_sha".to_string(), upstream.clone());
                     }
 
-                    self.active_screen = ActiveScreen::ContentViewer(ContentViewerState::new_with_info(
-                        content,
-                        format!("Review: {} - {}", name, &commit.sha[..12]),
-                        false,
-                        commit_info,
-                    ));
+                    self.active_screen =
+                        ActiveScreen::ContentViewer(ContentViewerState::new_with_info(
+                            content,
+                            format!("Review: {} - {}", name, &commit.sha[..12]),
+                            false,
+                            commit_info,
+                        ));
                 }
             }
         }
@@ -1330,7 +1348,10 @@ impl TuiApp {
                         .get_review_content(model_id, &commit.sha, "review-inline.txt")
                 {
                     if review.has_fix_patches {
-                        content = format!("AI Fix Patches: AVAILABLE (Press 'p' to view)\n\n{}", content);
+                        content = format!(
+                            "AI Fix Patches: AVAILABLE (Press 'p' to view)\n\n{}",
+                            content
+                        );
                     }
                     let models_map = self.state.db.load_models();
                     let name = models_map
@@ -1348,12 +1369,13 @@ impl TuiApp {
                         commit_info.insert("upstream_sha".to_string(), upstream.clone());
                     }
 
-                    self.active_screen = ActiveScreen::ContentViewer(ContentViewerState::new_with_info(
-                        content,
-                        format!("Review: {} - {}", name, &commit.sha[..12]),
-                        false,
-                        commit_info,
-                    ));
+                    self.active_screen =
+                        ActiveScreen::ContentViewer(ContentViewerState::new_with_info(
+                            content,
+                            format!("Review: {} - {}", name, &commit.sha[..12]),
+                            false,
+                            commit_info,
+                        ));
                 }
             }
         }
@@ -1468,7 +1490,11 @@ impl TuiApp {
         for (row_idx, commit) in self.state.filtered_commits.iter().enumerate() {
             let row_selected = self.selected_row == row_idx;
             let has_issues = self.state.visible_models.iter().any(|model_id| {
-                commit.reviews.get(model_id).map(|r| r.issues_found > 0).unwrap_or(false)
+                commit
+                    .reviews
+                    .get(model_id)
+                    .map(|r| r.issues_found > 0)
+                    .unwrap_or(false)
             });
 
             let status_emoji = match commit.status {
@@ -1504,7 +1530,7 @@ impl TuiApp {
 
             spans.push(Span::styled(subject, cell_style));
 
-            let mut row_cells = vec![Line::from(spans)];
+            let mut row_cells = vec![Cell::from(Line::from(spans)).style(cell_style)];
 
             for (col_idx, model_id) in self.state.visible_models.iter().enumerate() {
                 let cell_col_selected = row_selected && self.selected_col == col_idx + 1;
@@ -1516,7 +1542,23 @@ impl TuiApp {
                         has_issues,
                         &theme,
                     );
-                    row_cells.push(formatted);
+                    let model_cell_style = if cell_col_selected {
+                        Style::default()
+                            .fg(theme.selected_fg)
+                            .bg(theme.selected_bg)
+                            .add_modifier(Modifier::BOLD)
+                    } else if review.issues_found > 0 {
+                        Style::default()
+                            .bg(theme.issue_count_bg)
+                            .add_modifier(Modifier::BOLD)
+                    } else if row_selected {
+                        Style::default().bg(theme.selection_bg)
+                    } else if has_issues {
+                        Style::default().add_modifier(Modifier::BOLD)
+                    } else {
+                        Style::default()
+                    };
+                    row_cells.push(Cell::from(formatted).style(model_cell_style));
                 } else {
                     let empty_style = if cell_col_selected {
                         Style::default().fg(theme.selected_fg).bg(theme.selected_bg)
@@ -1525,7 +1567,7 @@ impl TuiApp {
                     } else {
                         Style::default()
                     };
-                    row_cells.push(Line::from(vec![Span::styled("", empty_style)]));
+                    row_cells.push(Cell::from("").style(empty_style));
                 }
             }
 
@@ -1536,7 +1578,11 @@ impl TuiApp {
             .header(header_row)
             .block(Block::default().borders(Borders::ALL).title(" Commits "))
             .highlight_style(Style::default().bg(theme.selection_bg))
-            .style(Style::default().fg(theme.default_text_fg).bg(theme.default_bg))
+            .style(
+                Style::default()
+                    .fg(theme.default_text_fg)
+                    .bg(theme.default_bg),
+            )
             .column_spacing(1);
 
         f.render_stateful_widget(t, area, &mut self.table_state);
@@ -1557,6 +1603,10 @@ impl TuiApp {
                 .fg(theme.selected_fg)
                 .bg(theme.selected_bg)
                 .add_modifier(Modifier::BOLD)
+        } else if review.issues_found > 0 {
+            Style::default()
+                .bg(theme.issue_count_bg)
+                .add_modifier(Modifier::BOLD)
         } else if row_selected {
             Style::default().bg(theme.selection_bg)
         } else if has_issues {
@@ -1569,7 +1619,9 @@ impl TuiApp {
         if review.issues_found > 0 {
             spans.push(Span::styled(
                 review.issues_found.to_string(),
-                base_style.fg(theme.issue_count_fg).add_modifier(Modifier::BOLD),
+                base_style
+                    .fg(theme.issue_count_fg)
+                    .add_modifier(Modifier::BOLD),
             ));
         } else {
             spans.push(Span::styled("0", base_style));
@@ -1584,7 +1636,9 @@ impl TuiApp {
         if has_downstream_only {
             spans.push(Span::styled(
                 format!("[{}]", review.findings_downstream_only),
-                base_style.fg(theme.findings_downstream_only_fg).add_modifier(Modifier::BOLD),
+                base_style
+                    .fg(theme.findings_downstream_only_fg)
+                    .add_modifier(Modifier::BOLD),
             ));
         }
 
@@ -1861,7 +1915,11 @@ impl TuiApp {
         }
 
         let p = Paragraph::new(text_lines)
-            .style(Style::default().fg(theme.default_text_fg).bg(theme.default_bg))
+            .style(
+                Style::default()
+                    .fg(theme.default_text_fg)
+                    .bg(theme.default_bg),
+            )
             .block(
                 Block::default()
                     .borders(Borders::ALL)
@@ -1908,7 +1966,11 @@ impl TuiApp {
 
                 let current_filter = self.state.author_filter.as_deref().unwrap_or("All Authors");
                 let p = Paragraph::new(list_lines)
-                    .style(Style::default().fg(theme.default_text_fg).bg(theme.default_bg))
+                    .style(
+                        Style::default()
+                            .fg(theme.default_text_fg)
+                            .bg(theme.default_bg),
+                    )
                     .block(
                         Block::default()
                             .borders(Borders::ALL)
@@ -1934,7 +1996,11 @@ impl TuiApp {
                 }
 
                 let p = Paragraph::new(list_lines)
-                    .style(Style::default().fg(theme.default_text_fg).bg(theme.default_bg))
+                    .style(
+                        Style::default()
+                            .fg(theme.default_text_fg)
+                            .bg(theme.default_bg),
+                    )
                     .block(
                         Block::default()
                             .borders(Borders::ALL)
@@ -1959,7 +2025,11 @@ impl TuiApp {
                         Style::default().fg(theme.help_sep_fg),
                     )),
                 ])
-                .style(Style::default().fg(theme.default_text_fg).bg(theme.default_bg))
+                .style(
+                    Style::default()
+                        .fg(theme.default_text_fg)
+                        .bg(theme.default_bg),
+                )
                 .block(
                     Block::default()
                         .borders(Borders::ALL)
@@ -1995,7 +2065,11 @@ impl TuiApp {
                 )));
 
                 let p = Paragraph::new(list_lines)
-                    .style(Style::default().fg(theme.default_text_fg).bg(theme.default_bg))
+                    .style(
+                        Style::default()
+                            .fg(theme.default_text_fg)
+                            .bg(theme.default_bg),
+                    )
                     .block(
                         Block::default()
                             .borders(Borders::ALL)
@@ -2023,7 +2097,11 @@ impl TuiApp {
                 }
 
                 let p = Paragraph::new(list_lines)
-                    .style(Style::default().fg(theme.default_text_fg).bg(theme.default_bg))
+                    .style(
+                        Style::default()
+                            .fg(theme.default_text_fg)
+                            .bg(theme.default_bg),
+                    )
                     .block(
                         Block::default()
                             .borders(Borders::ALL)
@@ -2098,7 +2176,11 @@ impl TuiApp {
                 add_item(Some("q"), "Quit application (Table only)");
 
                 let p = Paragraph::new(list_lines)
-                    .style(Style::default().fg(theme.default_text_fg).bg(theme.default_bg))
+                    .style(
+                        Style::default()
+                            .fg(theme.default_text_fg)
+                            .bg(theme.default_bg),
+                    )
                     .block(
                         Block::default()
                             .borders(Borders::ALL)
@@ -2112,7 +2194,8 @@ impl TuiApp {
 
                 f.render_widget(Clear, area);
 
-                let mut lines = render_note_text_with_cursor(&s.input_value, s.cursor_position, &theme);
+                let mut lines =
+                    render_note_text_with_cursor(&s.input_value, s.cursor_position, &theme);
 
                 lines.push(Line::from(""));
                 lines.push(Line::from(Span::styled(
@@ -2121,13 +2204,16 @@ impl TuiApp {
                 )));
 
                 let p = Paragraph::new(lines)
-                    .style(Style::default().fg(theme.default_text_fg).bg(theme.default_bg))
+                    .style(
+                        Style::default()
+                            .fg(theme.default_text_fg)
+                            .bg(theme.default_bg),
+                    )
                     .wrap(Wrap { trim: false })
-                    .block(
-                        Block::default()
-                            .borders(Borders::ALL)
-                            .title(format!(" Edit Note for Commit {} ", &s.sha[..12.min(s.sha.len())])),
-                    );
+                    .block(Block::default().borders(Borders::ALL).title(format!(
+                        " Edit Note for Commit {} ",
+                        &s.sha[..12.min(s.sha.len())]
+                    )));
                 f.render_widget(p, area);
             }
             ActiveDialog::None => {}
@@ -2140,9 +2226,7 @@ impl CellFormat {
     fn header(txt: &str, fg: Color) -> Line<'static> {
         Line::from(Span::styled(
             txt.to_string(),
-            Style::default()
-                .fg(fg)
-                .add_modifier(Modifier::BOLD),
+            Style::default().fg(fg).add_modifier(Modifier::BOLD),
         ))
     }
 }
@@ -2183,9 +2267,7 @@ fn render_note_text_with_cursor(
             if is_cursor {
                 current_line_spans.push(Span::styled(
                     "█",
-                    Style::default()
-                        .fg(theme.subtitle_fg)
-                        .bg(theme.default_bg),
+                    Style::default().fg(theme.subtitle_fg).bg(theme.default_bg),
                 ));
             }
             break;
@@ -2292,11 +2374,13 @@ mod tests {
         assert_eq!(dark_styles.header_bg, Color::DarkGray);
         assert_eq!(dark_styles.header_fg, Color::White);
         assert_eq!(dark_styles.selected_bg, Color::Cyan);
+        assert_eq!(dark_styles.issue_count_bg, Color::Rgb(50, 20, 20));
 
         let light_styles = ThemeStyles::new(ColorTheme::Light);
         assert_eq!(light_styles.header_bg, Color::Gray);
         assert_eq!(light_styles.header_fg, Color::Black);
         assert_eq!(light_styles.selected_bg, Color::Cyan);
+        assert_eq!(light_styles.issue_count_bg, Color::Rgb(255, 220, 220));
 
         // Test theme querying via TuiApp config
         let mut config = Config::default();
@@ -2370,17 +2454,15 @@ mod tests {
 
         // 2. Test selection out-of-bounds adjustment (clamping to max_row - 1)
         // Simulate applying a filter that leaves only 1 commit
-        app.state.filtered_commits = vec![
-            CommitReview {
-                sha: "1111111111111111111111111111111111111111".to_string(),
-                subject: "Commit 1".to_string(),
-                author: "Author A".to_string(),
-                suse_commit: None,
-                upstream_commit: None,
-                reviews: std::collections::HashMap::new(),
-                status: Status::Unread,
-            },
-        ];
+        app.state.filtered_commits = vec![CommitReview {
+            sha: "1111111111111111111111111111111111111111".to_string(),
+            subject: "Commit 1".to_string(),
+            author: "Author A".to_string(),
+            suse_commit: None,
+            upstream_commit: None,
+            reviews: std::collections::HashMap::new(),
+            status: Status::Unread,
+        }];
 
         // Ensure validate_selection correctly clamps to index 0
         app.validate_selection();
@@ -2651,7 +2733,10 @@ mod tests {
 
         assert!(matches!(app.active_dialog, ActiveDialog::None));
 
-        let note_text = app.state.get_commit_note("test_sha_notes_ui_1234567890").unwrap();
+        let note_text = app
+            .state
+            .get_commit_note("test_sha_notes_ui_1234567890")
+            .unwrap();
         assert_eq!(note_text, "\nd");
 
         app.action_show_downstream(&commit);
@@ -2663,5 +2748,54 @@ mod tests {
         }
 
         let _ = std::fs::remove_dir_all(&notes_dir);
+    }
+
+    #[test]
+    fn test_format_review_cell_issue_background() {
+        let theme = ThemeStyles::new(ColorTheme::Dark);
+
+        let review_with_issues = ReviewMetadata {
+            author: "Author A".to_string(),
+            subject: "Commit 1".to_string(),
+            issues_found: 2,
+            issue_severity_score: Severity::Low,
+            issue_severity_explanation: "None".to_string(),
+            sha: "1111111111111111111111111111111111111111".to_string(),
+            model: "model_1".to_string(),
+            review_time_seconds: 1.0,
+            input_tokens: 1,
+            output_tokens: 1,
+            total_tokens: 2,
+            suse_commit: None,
+            upstream_commit: None,
+            has_pre_verification: false,
+            findings_downstream_only: 0,
+            has_fix_patches: false,
+        };
+
+        // 1. Not selected, but has issues: should use theme.issue_count_bg
+        let line_unselected = TuiApp::format_review_cell(
+            &review_with_issues,
+            false, // cell_selected
+            false, // row_selected
+            true,  // has_issues
+            &theme,
+        );
+
+        assert!(!line_unselected.spans.is_empty());
+        let first_span = &line_unselected.spans[0];
+        assert_eq!(first_span.style.bg, Some(theme.issue_count_bg));
+
+        // 2. Cell is selected: should use theme.selected_bg (Cyan) rather than theme.issue_count_bg
+        let line_selected = TuiApp::format_review_cell(
+            &review_with_issues,
+            true,  // cell_selected
+            false, // row_selected
+            true,  // has_issues
+            &theme,
+        );
+        assert!(!line_selected.spans.is_empty());
+        let first_span_selected = &line_selected.spans[0];
+        assert_eq!(first_span_selected.style.bg, Some(theme.selected_bg));
     }
 }
