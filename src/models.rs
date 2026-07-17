@@ -59,7 +59,7 @@ pub struct ReviewMetadata {
     pub output_tokens: u64,
     #[serde(rename = "total-tokens", default)]
     pub total_tokens: u64,
-    #[serde(rename = "suse-commit")]
+    #[serde(rename = "suse-commit", alias = "distro-commit")]
     pub suse_commit: Option<String>,
     #[serde(rename = "upstream-commit")]
     pub upstream_commit: Option<String>,
@@ -120,5 +120,30 @@ mod tests {
         assert_eq!(Status::Unread.as_str(), "unread");
         assert_eq!(Status::Ok.as_str(), "ok");
         assert_eq!(Status::Bad.as_str(), "bad");
+    }
+
+    #[test]
+    fn test_review_metadata_deserialization() {
+        let json_suse = r#"{
+            "author": "Alice",
+            "subject": "Some fix",
+            "sha": "123456",
+            "model": "model_1",
+            "suse-commit": "abcdef"
+        }"#;
+
+        let json_distro = r#"{
+            "author": "Alice",
+            "subject": "Some fix",
+            "sha": "123456",
+            "model": "model_1",
+            "distro-commit": "abcdef"
+        }"#;
+
+        let meta_suse: ReviewMetadata = serde_json::from_str(json_suse).unwrap();
+        let meta_distro: ReviewMetadata = serde_json::from_str(json_distro).unwrap();
+
+        assert_eq!(meta_suse.suse_commit, Some("abcdef".to_string()));
+        assert_eq!(meta_distro.suse_commit, Some("abcdef".to_string()));
     }
 }

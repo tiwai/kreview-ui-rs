@@ -130,7 +130,7 @@ impl ContentViewerState {
                 if parts.len() >= 2 {
                     commit_info.insert("downstream_sha".to_string(), parts[1].to_string());
                 }
-            } else if line.starts_with("suse-commit:") {
+            } else if line.starts_with("suse-commit:") || line.starts_with("distro-commit:") {
                 if let Some(sha) = line.split(':').nth(1) {
                     commit_info.insert("suse_sha".to_string(), sha.trim().to_string());
                 }
@@ -1834,6 +1834,7 @@ impl TuiApp {
                     // Highlight metadata tags in reviews
                     let tags = [
                         "suse-commit:",
+                        "distro-commit:",
                         "Git-commit:",
                         "Verified-against:",
                         "Upstream-subject:",
@@ -2797,5 +2798,20 @@ mod tests {
         assert!(!line_selected.spans.is_empty());
         let first_span_selected = &line_selected.spans[0];
         assert_eq!(first_span_selected.style.bg, Some(theme.selected_bg));
+    }
+
+    #[test]
+    fn test_content_viewer_heuristics_suse_and_distro_commit() {
+        let content_suse = "commit 1234567890abcdef\nsuse-commit:abcdef123456\nGit-commit:9876543210".to_string();
+        let state_suse = ContentViewerState::new(content_suse, "Title".to_string(), false);
+        assert_eq!(state_suse.commit_info.get("downstream_sha").unwrap(), "1234567890abcdef");
+        assert_eq!(state_suse.commit_info.get("suse_sha").unwrap(), "abcdef123456");
+        assert_eq!(state_suse.commit_info.get("upstream_sha").unwrap(), "9876543210");
+
+        let content_distro = "commit 1234567890abcdef\ndistro-commit:fedcba654321\nGit-commit:9876543210".to_string();
+        let state_distro = ContentViewerState::new(content_distro, "Title".to_string(), false);
+        assert_eq!(state_distro.commit_info.get("downstream_sha").unwrap(), "1234567890abcdef");
+        assert_eq!(state_distro.commit_info.get("suse_sha").unwrap(), "fedcba654321");
+        assert_eq!(state_distro.commit_info.get("upstream_sha").unwrap(), "9876543210");
     }
 }
