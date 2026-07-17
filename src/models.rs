@@ -156,7 +156,20 @@ fn find_split_point(s: &str, min_idx: usize, max_idx: usize) -> usize {
     // Search backwards for a punctuation/operator boundary
     for i in (min_idx..max_idx).rev() {
         if let Some(c) = s.chars().nth(i) {
-            if c == ';' || c == ',' || c == '(' || c == ')' || c == '{' || c == '}' || c == '[' || c == ']' || c == '=' || c == '+' || c == '-' || c == '&' || c == '|' {
+            if c == ';'
+                || c == ','
+                || c == '('
+                || c == ')'
+                || c == '{'
+                || c == '}'
+                || c == '['
+                || c == ']'
+                || c == '='
+                || c == '+'
+                || c == '-'
+                || c == '&'
+                || c == '|'
+            {
                 return i + 1; // Split after the operator/punctuation
             }
         }
@@ -174,20 +187,24 @@ pub fn wrap_code(text: &str, max_width: usize) -> String {
             // Find leading whitespace
             let leading_ws: String = line.chars().take_while(|c| c.is_whitespace()).collect();
             let continuation_indent = leading_ws.clone();
-            
+
             let mut current_line = line.to_string();
             let mut is_first = true;
-            
+
             while current_line.len() > max_width {
                 let limit = max_width;
-                let min_idx = if is_first { leading_ws.len() } else { continuation_indent.len() };
-                
+                let min_idx = if is_first {
+                    leading_ws.len()
+                } else {
+                    continuation_indent.len()
+                };
+
                 // Find split point in current_line
                 let split_idx = find_split_point(&current_line, min_idx, limit);
-                
+
                 let chunk = current_line[..split_idx].trim_end().to_string();
                 wrapped.push(chunk);
-                
+
                 let remainder = current_line[split_idx..].trim_start().to_string();
                 current_line = format!("{}{}", continuation_indent, remainder);
                 is_first = false;
@@ -241,7 +258,10 @@ impl InlineReview {
 
         // Group metadata without blank lines
         out.push_str(&format!("Review-model: {}\n", self.model));
-        out.push_str(&format!("Review-time: {:.2} seconds\n", self.review_time_seconds));
+        out.push_str(&format!(
+            "Review-time: {:.2} seconds\n",
+            self.review_time_seconds
+        ));
         out.push_str(&format!("Input-tokens: {}\n", self.input_tokens));
         out.push_str(&format!("Output-tokens: {}\n", self.output_tokens));
         out.push_str(&format!("Total-tokens: {}\n", self.total_tokens));
@@ -250,7 +270,7 @@ impl InlineReview {
             out.push_str("\n=== Findings ===\n");
             for (i, finding) in self.findings.iter().enumerate() {
                 out.push_str(&format!("\n=== Finding {} ===\n", i + 1));
-                
+
                 if let Some(ref cat) = finding.category {
                     out.push_str(&format!("Category: {}\n", cat));
                 }
@@ -384,12 +404,24 @@ mod tests {
     fn test_strip_patch_prefix() {
         assert_eq!(strip_patch_prefix("[PATCH] Fix typo"), "Fix typo");
         assert_eq!(strip_patch_prefix("[PATCH 1/1] Fix bug"), "Fix bug");
-        assert_eq!(strip_patch_prefix("[PATCH v2 3/5] Add feature"), "Add feature");
+        assert_eq!(
+            strip_patch_prefix("[PATCH v2 3/5] Add feature"),
+            "Add feature"
+        );
         assert_eq!(strip_patch_prefix("[RFC PATCH] Test patch"), "Test patch");
-        assert_eq!(strip_patch_prefix("[RFC] [PATCH] Another test"), "[RFC] [PATCH] Another test");
-        assert_eq!(strip_patch_prefix("[PATCH][v3] Double bracket"), "[v3] Double bracket");
+        assert_eq!(
+            strip_patch_prefix("[RFC] [PATCH] Another test"),
+            "[RFC] [PATCH] Another test"
+        );
+        assert_eq!(
+            strip_patch_prefix("[PATCH][v3] Double bracket"),
+            "[v3] Double bracket"
+        );
         assert_eq!(strip_patch_prefix("No prefix here"), "No prefix here");
-        assert_eq!(strip_patch_prefix("[NO-MATCH] Normal bracket"), "[NO-MATCH] Normal bracket");
+        assert_eq!(
+            strip_patch_prefix("[NO-MATCH] Normal bracket"),
+            "[NO-MATCH] Normal bracket"
+        );
     }
 
     #[test]
@@ -418,10 +450,17 @@ mod tests {
         }"#;
 
         let inline_rev: InlineReview = serde_json::from_str(json_data).unwrap();
-        assert_eq!(inline_rev.commit, "0bcf8e471daa283f4273d2538fe655ee47564d76");
-        assert_eq!(inline_rev.suse_commit, Some("c2450991414e40c2f39d15095a7514fc41579c53".to_string()));
+        assert_eq!(
+            inline_rev.commit,
+            "0bcf8e471daa283f4273d2538fe655ee47564d76"
+        );
+        assert_eq!(
+            inline_rev.suse_commit,
+            Some("c2450991414e40c2f39d15095a7514fc41579c53".to_string())
+        );
 
-        let rendered = inline_rev.render_with_width(Some("diff --git a/drivers/tee/optee/supp.c"), 80);
+        let rendered =
+            inline_rev.render_with_width(Some("diff --git a/drivers/tee/optee/supp.c"), 80);
         assert!(rendered.contains("commit 0bcf8e471daa283f4273d2538fe655ee47564d76"));
         assert!(rendered.contains("Author: Ivan T. Ivanov <iivanov@suse.de>"));
         assert!(rendered.contains("distro-commit: c2450991414e40c2f39d15095a7514fc41579c53"));
@@ -434,9 +473,9 @@ mod tests {
         assert!(rendered.contains("Message:"));
         assert!(rendered.contains("Reverting the fix"));
         assert!(rendered.contains("Evidence:"));
-        
-        // Assert on the folded/wrapped code line. 
-        // Index 80 in "    kfree(req); // a very long comment explaining..." should split 
+
+        // Assert on the folded/wrapped code line.
+        // Index 80 in "    kfree(req); // a very long comment explaining..." should split
         // with prepended 4 spaces matching leading whitespace.
         assert!(rendered.contains("    which is very long indeed"));
     }
@@ -468,11 +507,15 @@ mod tests {
 
         // 1. Render with a small width (50). The evidence should wrap/split.
         let rendered_50 = inline_rev.render_with_width(None, 50);
-        assert!(rendered_50.contains("    kfree(req); // a very long comment explaining\n    that we are freeing req here"));
+        assert!(rendered_50.contains(
+            "    kfree(req); // a very long comment explaining\n    that we are freeing req here"
+        ));
 
         // 2. Render with a larger width (100). The evidence fits fully on one line (it is 76 chars long).
         let rendered_100 = inline_rev.render_with_width(None, 100);
-        assert!(rendered_100.contains("    kfree(req); // a very long comment explaining that we are freeing req here"));
+        assert!(rendered_100.contains(
+            "    kfree(req); // a very long comment explaining that we are freeing req here"
+        ));
         assert!(!rendered_100.contains("\n    explaining"));
     }
 }

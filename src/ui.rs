@@ -11,7 +11,7 @@ use std::collections::HashMap;
 use std::io;
 
 use crate::git_ops::GitViewer;
-use crate::models::{CommitReview, ReviewMetadata, Severity, Status, strip_patch_prefix};
+use crate::models::{strip_patch_prefix, CommitReview, ReviewMetadata, Severity, Status};
 use crate::state::AppState;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -653,7 +653,7 @@ impl TuiApp {
                         ActiveScreen::ContentViewer(ContentViewerState::new_with_info(
                             content,
                             format!("Downstream Commit: {}", &sha[..12]),
-                            true,
+                            false,
                             s.commit_info.clone(),
                         ));
                 }
@@ -1298,9 +1298,19 @@ impl TuiApp {
         }
     }
 
-    fn get_rendered_review_details(&self, model_id: &str, sha: &str) -> Option<(String, Option<String>, Option<String>, Option<usize>)> {
-        if let Some(json_str) = self.state.db.get_review_content(model_id, sha, "review-inline.json") {
-            if let Ok(inline_review) = serde_json::from_str::<crate::models::InlineReview>(&json_str) {
+    fn get_rendered_review_details(
+        &self,
+        model_id: &str,
+        sha: &str,
+    ) -> Option<(String, Option<String>, Option<String>, Option<usize>)> {
+        if let Some(json_str) =
+            self.state
+                .db
+                .get_review_content(model_id, sha, "review-inline.json")
+        {
+            if let Ok(inline_review) =
+                serde_json::from_str::<crate::models::InlineReview>(&json_str)
+            {
                 let diff_content = self.git_viewer.show_downstream_diff(sha).ok();
                 let width = if let Ok((cols, _)) = crossterm::terminal::size() {
                     (cols.saturating_sub(2) as usize).max(40)
@@ -1312,7 +1322,11 @@ impl TuiApp {
             }
         }
 
-        if let Some(content) = self.state.db.get_review_content(model_id, sha, "review-inline.txt") {
+        if let Some(content) = self
+            .state
+            .db
+            .get_review_content(model_id, sha, "review-inline.txt")
+        {
             return Some((content, None, None, None));
         }
 
@@ -1324,7 +1338,9 @@ impl TuiApp {
         if index < self.state.visible_models.len() {
             let model_id = &self.state.visible_models[index];
             if let Some(review) = commit.reviews.get(model_id) {
-                if let Some((mut content, source_json, diff_content, rendered_width)) = self.get_rendered_review_details(model_id, &commit.sha) {
+                if let Some((mut content, source_json, diff_content, rendered_width)) =
+                    self.get_rendered_review_details(model_id, &commit.sha)
+                {
                     if review.has_fix_patches {
                         content = format!(
                             "AI Fix Patches: AVAILABLE (Press 'p' to view)\n\n{}",
@@ -1378,7 +1394,9 @@ impl TuiApp {
         if let Some(commit) = commit_opt {
             let model_id = &self.state.visible_models[index];
             if let Some(review) = commit.reviews.get(model_id) {
-                if let Some((mut content, source_json, diff_content, rendered_width)) = self.get_rendered_review_details(model_id, &commit.sha) {
+                if let Some((mut content, source_json, diff_content, rendered_width)) =
+                    self.get_rendered_review_details(model_id, &commit.sha)
+                {
                     if review.has_fix_patches {
                         content = format!(
                             "AI Fix Patches: AVAILABLE (Press 'p' to view)\n\n{}",
@@ -1478,16 +1496,25 @@ impl TuiApp {
             let target_width = (chunks[2].width.saturating_sub(2) as usize).max(40);
             if let Some(w) = s.rendered_width {
                 if w != target_width {
-                    if let (Some(ref json_str), Some(ref diff)) = (&s.source_json, &s.diff_content) {
-                        if let Ok(inline_review) = serde_json::from_str::<crate::models::InlineReview>(json_str) {
+                    if let (Some(ref json_str), Some(ref diff)) = (&s.source_json, &s.diff_content)
+                    {
+                        if let Ok(inline_review) =
+                            serde_json::from_str::<crate::models::InlineReview>(json_str)
+                        {
                             let content = inline_review.render_with_width(Some(diff), target_width);
                             let content = if s.content.starts_with("AI Fix Patches: AVAILABLE") {
-                                format!("AI Fix Patches: AVAILABLE (Press 'p' to view)\n\n{}", content)
+                                format!(
+                                    "AI Fix Patches: AVAILABLE (Press 'p' to view)\n\n{}",
+                                    content
+                                )
                             } else {
                                 content
                             };
                             s.content = content.clone();
-                            s.lines = content.lines().map(|line| line.replace('\t', "        ")).collect();
+                            s.lines = content
+                                .lines()
+                                .map(|line| line.replace('\t', "        "))
+                                .collect();
                             s.rendered_width = Some(target_width);
                         }
                     }
@@ -1839,7 +1866,11 @@ impl TuiApp {
                         line.as_str().to_string(),
                         Style::default().fg(theme.diff_hunk_fg),
                     )));
-                } else if line.starts_with("diff ") || line.starts_with("index ") {
+                } else if line.starts_with("diff ")
+                    || line.starts_with("index ")
+                    || line.starts_with("---")
+                    || line.starts_with("+++")
+                {
                     text_lines.push(Line::from(Span::styled(
                         line.as_str().to_string(),
                         Style::default().fg(theme.diff_meta_fg),
@@ -1942,9 +1973,7 @@ impl TuiApp {
                             };
                             Span::styled(
                                 after.to_string(),
-                                Style::default()
-                                    .fg(sev_color)
-                                    .add_modifier(Modifier::BOLD),
+                                Style::default().fg(sev_color).add_modifier(Modifier::BOLD),
                             )
                         } else {
                             Span::styled(
@@ -2881,17 +2910,38 @@ mod tests {
 
     #[test]
     fn test_content_viewer_heuristics_suse_and_distro_commit() {
-        let content_suse = "commit 1234567890abcdef\nsuse-commit:abcdef123456\nGit-commit:9876543210".to_string();
+        let content_suse =
+            "commit 1234567890abcdef\nsuse-commit:abcdef123456\nGit-commit:9876543210".to_string();
         let state_suse = ContentViewerState::new(content_suse, "Title".to_string(), false);
-        assert_eq!(state_suse.commit_info.get("downstream_sha").unwrap(), "1234567890abcdef");
-        assert_eq!(state_suse.commit_info.get("suse_sha").unwrap(), "abcdef123456");
-        assert_eq!(state_suse.commit_info.get("upstream_sha").unwrap(), "9876543210");
+        assert_eq!(
+            state_suse.commit_info.get("downstream_sha").unwrap(),
+            "1234567890abcdef"
+        );
+        assert_eq!(
+            state_suse.commit_info.get("suse_sha").unwrap(),
+            "abcdef123456"
+        );
+        assert_eq!(
+            state_suse.commit_info.get("upstream_sha").unwrap(),
+            "9876543210"
+        );
 
-        let content_distro = "commit 1234567890abcdef\ndistro-commit:fedcba654321\nGit-commit:9876543210".to_string();
+        let content_distro =
+            "commit 1234567890abcdef\ndistro-commit:fedcba654321\nGit-commit:9876543210"
+                .to_string();
         let state_distro = ContentViewerState::new(content_distro, "Title".to_string(), false);
-        assert_eq!(state_distro.commit_info.get("downstream_sha").unwrap(), "1234567890abcdef");
-        assert_eq!(state_distro.commit_info.get("suse_sha").unwrap(), "fedcba654321");
-        assert_eq!(state_distro.commit_info.get("upstream_sha").unwrap(), "9876543210");
+        assert_eq!(
+            state_distro.commit_info.get("downstream_sha").unwrap(),
+            "1234567890abcdef"
+        );
+        assert_eq!(
+            state_distro.commit_info.get("suse_sha").unwrap(),
+            "fedcba654321"
+        );
+        assert_eq!(
+            state_distro.commit_info.get("upstream_sha").unwrap(),
+            "9876543210"
+        );
     }
 
     #[test]
@@ -2928,5 +2978,23 @@ mod tests {
         } else {
             panic!("Expected ActiveScreen to be ContentViewer");
         }
+    }
+
+    #[test]
+    fn test_raw_downstream_commit_is_not_downstream_view() {
+        let mut commit_info = HashMap::new();
+        commit_info.insert(
+            "downstream_sha".to_string(),
+            "1234567890123456789012345678901234567890".to_string(),
+        );
+
+        let cv_state = ContentViewerState::new_with_info(
+            "dummy content".to_string(),
+            "Downstream Commit: 123456789012".to_string(),
+            false,
+            commit_info,
+        );
+
+        assert!(!cv_state.is_downstream_view);
     }
 }
