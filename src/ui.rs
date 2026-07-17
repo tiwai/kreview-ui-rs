@@ -114,6 +114,9 @@ pub struct ContentViewerState {
     pub lines: Vec<String>,
     pub commit_info: HashMap<String, String>,
     pub is_downstream_view: bool,
+    pub source_json: Option<String>,
+    pub diff_content: Option<String>,
+    pub rendered_width: Option<usize>,
 }
 
 impl ContentViewerState {
@@ -150,6 +153,9 @@ impl ContentViewerState {
             lines,
             commit_info,
             is_downstream_view,
+            source_json: None,
+            diff_content: None,
+            rendered_width: None,
         }
     }
 
@@ -171,6 +177,9 @@ impl ContentViewerState {
             lines,
             commit_info,
             is_downstream_view,
+            source_json: None,
+            diff_content: None,
+            rendered_width: None,
         }
     }
 }
@@ -1289,20 +1298,25 @@ impl TuiApp {
         }
     }
 
-    fn get_rendered_review(&self, model_id: &str, sha: &str) -> Option<String> {
-        let mut content = None;
+    fn get_rendered_review_details(&self, model_id: &str, sha: &str) -> Option<(String, Option<String>, Option<String>, Option<usize>)> {
         if let Some(json_str) = self.state.db.get_review_content(model_id, sha, "review-inline.json") {
             if let Ok(inline_review) = serde_json::from_str::<crate::models::InlineReview>(&json_str) {
                 let diff_content = self.git_viewer.show_downstream_diff(sha).ok();
-                content = Some(inline_review.render(diff_content.as_deref()));
+                let width = if let Ok((cols, _)) = crossterm::terminal::size() {
+                    (cols.saturating_sub(2) as usize).max(40)
+                } else {
+                    80
+                };
+                let content = inline_review.render_with_width(diff_content.as_deref(), width);
+                return Some((content, Some(json_str), diff_content, Some(width)));
             }
         }
 
-        if content.is_none() {
-            content = self.state.db.get_review_content(model_id, sha, "review-inline.txt");
+        if let Some(content) = self.state.db.get_review_content(model_id, sha, "review-inline.txt") {
+            return Some((content, None, None, None));
         }
 
-        content
+        None
     }
 
     fn action_show_review(&mut self, commit: &CommitReview, index: usize) {
@@ -1310,7 +1324,7 @@ impl TuiApp {
         if index < self.state.visible_models.len() {
             let model_id = &self.state.visible_models[index];
             if let Some(review) = commit.reviews.get(model_id) {
-                if let Some(mut content) = self.get_rendered_review(model_id, &commit.sha) {
+                if let Some((mut content, source_json, diff_content, rendered_width)) = self.get_rendered_review_details(model_id, &commit.sha) {
                     if review.has_fix_patches {
                         content = format!(
                             "AI Fix Patches: AVAILABLE (Press 'p' to view)\n\n{}",
@@ -1333,13 +1347,17 @@ impl TuiApp {
                         commit_info.insert("upstream_sha".to_string(), upstream.clone());
                     }
 
-                    self.active_screen =
-                        ActiveScreen::ContentViewer(ContentViewerState::new_with_info(
-                            content,
-                            format!("Review: {} - {}", name, &commit.sha[..12]),
-                            false,
-                            commit_info,
-                        ));
+                    let mut cv_state = ContentViewerState::new_with_info(
+                        content,
+                        format!("Review: {} - {}", name, &commit.sha[..12]),
+                        false,
+                        commit_info,
+                    );
+                    cv_state.source_json = source_json;
+                    cv_state.diff_content = diff_content;
+                    cv_state.rendered_width = rendered_width;
+
+                    self.active_screen = ActiveScreen::ContentViewer(cv_state);
                 }
             }
         }
@@ -1360,7 +1378,7 @@ impl TuiApp {
         if let Some(commit) = commit_opt {
             let model_id = &self.state.visible_models[index];
             if let Some(review) = commit.reviews.get(model_id) {
-                if let Some(mut content) = self.get_rendered_review(model_id, &commit.sha) {
+                if let Some((mut content, source_json, diff_content, rendered_width)) = self.get_rendered_review_details(model_id, &commit.sha) {
                     if review.has_fix_patches {
                         content = format!(
                             "AI Fix Patches: AVAILABLE (Press 'p' to view)\n\n{}",
@@ -1383,13 +1401,17 @@ impl TuiApp {
                         commit_info.insert("upstream_sha".to_string(), upstream.clone());
                     }
 
-                    self.active_screen =
-                        ActiveScreen::ContentViewer(ContentViewerState::new_with_info(
-                            content,
-                            format!("Review: {} - {}", name, &commit.sha[..12]),
-                            false,
-                            commit_info,
-                        ));
+                    let mut cv_state = ContentViewerState::new_with_info(
+                        content,
+                        format!("Review: {} - {}", name, &commit.sha[..12]),
+                        false,
+                        commit_info,
+                    );
+                    cv_state.source_json = source_json;
+                    cv_state.diff_content = diff_content;
+                    cv_state.rendered_width = rendered_width;
+
+                    self.active_screen = ActiveScreen::ContentViewer(cv_state);
                 }
             }
         }
@@ -1450,6 +1472,28 @@ impl TuiApp {
             .fg(theme.subtitle_fg)
             .bg(theme.subtitle_bg);
         f.render_widget(subtitle, chunks[1]);
+
+        // Re-wrap ContentViewer if window resized
+        if let ActiveScreen::ContentViewer(ref mut s) = self.active_screen {
+            let target_width = (chunks[2].width.saturating_sub(2) as usize).max(40);
+            if let Some(w) = s.rendered_width {
+                if w != target_width {
+                    if let (Some(ref json_str), Some(ref diff)) = (&s.source_json, &s.diff_content) {
+                        if let Ok(inline_review) = serde_json::from_str::<crate::models::InlineReview>(json_str) {
+                            let content = inline_review.render_with_width(Some(diff), target_width);
+                            let content = if s.content.starts_with("AI Fix Patches: AVAILABLE") {
+                                format!("AI Fix Patches: AVAILABLE (Press 'p' to view)\n\n{}", content)
+                            } else {
+                                content
+                            };
+                            s.content = content.clone();
+                            s.lines = content.lines().map(|line| line.replace('\t', "        ")).collect();
+                            s.rendered_width = Some(target_width);
+                        }
+                    }
+                }
+            }
+        }
 
         // Draw active screen
         match &self.active_screen {

@@ -201,7 +201,17 @@ pub fn wrap_code(text: &str, max_width: usize) -> String {
 }
 
 impl InlineReview {
+    #[allow(dead_code)]
     pub fn render(&self, diff_content: Option<&str>) -> String {
+        let width = if let Ok((cols, _)) = crossterm::terminal::size() {
+            (cols.saturating_sub(2) as usize).max(40)
+        } else {
+            80
+        };
+        self.render_with_width(diff_content, width)
+    }
+
+    pub fn render_with_width(&self, diff_content: Option<&str>, width: usize) -> String {
         let mut out = String::new();
         out.push_str(&format!("commit {}\n", self.commit));
         out.push_str(&format!("Author: {}\n\n", self.author));
@@ -256,13 +266,13 @@ impl InlineReview {
 
                 if let Some(ref msg) = finding.message {
                     out.push_str("\nMessage:\n");
-                    let wrapped_msg = wrap_text(msg, 80);
+                    let wrapped_msg = wrap_text(msg, width);
                     out.push_str(&format!("{}\n", wrapped_msg));
                 }
 
                 if let Some(ref ev) = finding.evidence {
                     out.push_str("\nEvidence:\n");
-                    let wrapped_ev = wrap_code(ev, 80);
+                    let wrapped_ev = wrap_code(ev, width);
                     out.push_str(&format!("{}\n", wrapped_ev));
                 }
             }
@@ -411,7 +421,7 @@ mod tests {
         assert_eq!(inline_rev.commit, "0bcf8e471daa283f4273d2538fe655ee47564d76");
         assert_eq!(inline_rev.suse_commit, Some("c2450991414e40c2f39d15095a7514fc41579c53".to_string()));
 
-        let rendered = inline_rev.render(Some("diff --git a/drivers/tee/optee/supp.c"));
+        let rendered = inline_rev.render_with_width(Some("diff --git a/drivers/tee/optee/supp.c"), 80);
         assert!(rendered.contains("commit 0bcf8e471daa283f4273d2538fe655ee47564d76"));
         assert!(rendered.contains("Author: Ivan T. Ivanov <iivanov@suse.de>"));
         assert!(rendered.contains("distro-commit: c2450991414e40c2f39d15095a7514fc41579c53"));
@@ -429,5 +439,40 @@ mod tests {
         // Index 80 in "    kfree(req); // a very long comment explaining..." should split 
         // with prepended 4 spaces matching leading whitespace.
         assert!(rendered.contains("    which is very long indeed"));
+    }
+
+    #[test]
+    fn test_inline_review_rendering_with_different_widths() {
+        let json_data = r#"{
+          "commit": "0bcf8e471daa283f4273d2538fe655ee47564d76",
+          "author": "Ivan T. Ivanov <iivanov@suse.de>",
+          "subject": "Revert \"tee: optee: Fix supplicant wait loop (CVE-2025-21871)\"",
+          "findings": [
+            {
+              "category": "CHANGE-2",
+              "type": "use-after-free",
+              "severity": "high",
+              "confidence": "high",
+              "message": "Reverting the fix for CVE-2025-21871.",
+              "evidence": "    kfree(req); // a very long comment explaining that we are freeing req here"
+            }
+          ],
+          "review-time-seconds": 12.0,
+          "model": "gemma-4",
+          "input-tokens": 100,
+          "output-tokens": 100,
+          "total-tokens": 200
+        }"#;
+
+        let inline_rev: InlineReview = serde_json::from_str(json_data).unwrap();
+
+        // 1. Render with a small width (50). The evidence should wrap/split.
+        let rendered_50 = inline_rev.render_with_width(None, 50);
+        assert!(rendered_50.contains("    kfree(req); // a very long comment explaining\n    that we are freeing req here"));
+
+        // 2. Render with a larger width (100). The evidence fits fully on one line (it is 76 chars long).
+        let rendered_100 = inline_rev.render_with_width(None, 100);
+        assert!(rendered_100.contains("    kfree(req); // a very long comment explaining that we are freeing req here"));
+        assert!(!rendered_100.contains("\n    explaining"));
     }
 }
