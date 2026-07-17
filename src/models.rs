@@ -77,6 +77,211 @@ fn default_severity() -> Severity {
     Severity::None
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct BackportInfo {
+    pub upstream: Option<String>,
+    pub status: Option<String>,
+    pub summary: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct Finding {
+    pub category: Option<String>,
+    #[serde(rename = "type")]
+    pub finding_type: Option<String>,
+    pub severity: Option<Severity>,
+    pub confidence: Option<String>,
+    pub message: Option<String>,
+    pub evidence: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct InlineReview {
+    pub commit: String,
+    pub author: String,
+    pub subject: String,
+    #[serde(rename = "suse-commit", alias = "distro-commit")]
+    pub suse_commit: Option<String>,
+    #[serde(rename = "upstream-commit")]
+    pub upstream_commit: Option<String>,
+    pub backport: Option<BackportInfo>,
+    pub summary: Option<String>,
+    #[serde(default)]
+    pub findings: Vec<Finding>,
+    #[serde(rename = "review-time-seconds", default)]
+    pub review_time_seconds: f64,
+    pub model: String,
+    #[serde(rename = "input-tokens", default)]
+    pub input_tokens: u64,
+    #[serde(rename = "output-tokens", default)]
+    pub output_tokens: u64,
+    #[serde(rename = "total-tokens", default)]
+    pub total_tokens: u64,
+}
+
+pub fn wrap_text(text: &str, max_width: usize) -> String {
+    let mut wrapped = String::new();
+    for (i, paragraph) in text.split('\n').enumerate() {
+        if i > 0 {
+            wrapped.push('\n');
+        }
+        let mut line = String::new();
+        for word in paragraph.split_whitespace() {
+            if line.is_empty() {
+                line.push_str(word);
+            } else if line.len() + 1 + word.len() > max_width {
+                wrapped.push_str(&line);
+                wrapped.push('\n');
+                line = word.to_string();
+            } else {
+                line.push(' ');
+                line.push_str(word);
+            }
+        }
+        wrapped.push_str(&line);
+    }
+    wrapped
+}
+
+fn find_split_point(s: &str, min_idx: usize, max_idx: usize) -> usize {
+    if max_idx <= min_idx {
+        return max_idx;
+    }
+    // Search backwards for a space first (most natural word boundary)
+    for i in (min_idx..max_idx).rev() {
+        if s.chars().nth(i) == Some(' ') {
+            return i + 1; // Split after the space
+        }
+    }
+    // Search backwards for a punctuation/operator boundary
+    for i in (min_idx..max_idx).rev() {
+        if let Some(c) = s.chars().nth(i) {
+            if c == ';' || c == ',' || c == '(' || c == ')' || c == '{' || c == '}' || c == '[' || c == ']' || c == '=' || c == '+' || c == '-' || c == '&' || c == '|' {
+                return i + 1; // Split after the operator/punctuation
+            }
+        }
+    }
+    // Fallback to max_idx
+    max_idx
+}
+
+pub fn wrap_code(text: &str, max_width: usize) -> String {
+    let mut wrapped = Vec::new();
+    for line in text.lines() {
+        if line.len() <= max_width {
+            wrapped.push(line.to_string());
+        } else {
+            // Find leading whitespace
+            let leading_ws: String = line.chars().take_while(|c| c.is_whitespace()).collect();
+            let continuation_indent = leading_ws.clone();
+            
+            let mut current_line = line.to_string();
+            let mut is_first = true;
+            
+            while current_line.len() > max_width {
+                let limit = max_width;
+                let min_idx = if is_first { leading_ws.len() } else { continuation_indent.len() };
+                
+                // Find split point in current_line
+                let split_idx = find_split_point(&current_line, min_idx, limit);
+                
+                let chunk = current_line[..split_idx].trim_end().to_string();
+                wrapped.push(chunk);
+                
+                let remainder = current_line[split_idx..].trim_start().to_string();
+                current_line = format!("{}{}", continuation_indent, remainder);
+                is_first = false;
+            }
+            if !current_line.is_empty() && current_line != continuation_indent {
+                wrapped.push(current_line);
+            }
+        }
+    }
+    wrapped.join("\n")
+}
+
+impl InlineReview {
+    pub fn render(&self, diff_content: Option<&str>) -> String {
+        let mut out = String::new();
+        out.push_str(&format!("commit {}\n", self.commit));
+        out.push_str(&format!("Author: {}\n\n", self.author));
+        out.push_str(&format!("{}\n\n", self.subject));
+
+        if let Some(ref suse) = self.suse_commit {
+            out.push_str(&format!("distro-commit: {}\n", suse));
+        }
+        if let Some(ref upstream) = self.upstream_commit {
+            out.push_str(&format!("Git-commit: {}\n", upstream));
+        }
+
+        if let Some(ref bp) = self.backport {
+            if let Some(ref up) = bp.upstream {
+                out.push_str(&format!("Backport-upstream: {}\n", up));
+            }
+            if let Some(ref st) = bp.status {
+                out.push_str(&format!("Backport-status: {}\n", st));
+            }
+        }
+
+        out.push_str("\n");
+
+        if let Some(ref sum) = self.summary {
+            out.push_str(&format!("{}\n\n", sum));
+        }
+
+        // Group metadata without blank lines
+        out.push_str(&format!("Review-model: {}\n", self.model));
+        out.push_str(&format!("Review-time: {:.2} seconds\n", self.review_time_seconds));
+        out.push_str(&format!("Input-tokens: {}\n", self.input_tokens));
+        out.push_str(&format!("Output-tokens: {}\n", self.output_tokens));
+        out.push_str(&format!("Total-tokens: {}\n", self.total_tokens));
+
+        if !self.findings.is_empty() {
+            out.push_str("\n=== Findings ===\n");
+            for (i, finding) in self.findings.iter().enumerate() {
+                out.push_str(&format!("\n=== Finding {} ===\n", i + 1));
+                
+                if let Some(ref cat) = finding.category {
+                    out.push_str(&format!("Category: {}\n", cat));
+                }
+                if let Some(ref f_type) = finding.finding_type {
+                    out.push_str(&format!("Type: {}\n", f_type));
+                }
+                if let Some(sev) = finding.severity {
+                    out.push_str(&format!("Severity: {}\n", sev.as_str()));
+                }
+                if let Some(ref conf) = finding.confidence {
+                    out.push_str(&format!("Confidence: {}\n", conf));
+                }
+
+                if let Some(ref msg) = finding.message {
+                    out.push_str("\nMessage:\n");
+                    let wrapped_msg = wrap_text(msg, 80);
+                    out.push_str(&format!("{}\n", wrapped_msg));
+                }
+
+                if let Some(ref ev) = finding.evidence {
+                    out.push_str("\nEvidence:\n");
+                    let wrapped_ev = wrap_code(ev, 80);
+                    out.push_str(&format!("{}\n", wrapped_ev));
+                }
+            }
+        }
+
+        if let Some(diff) = diff_content {
+            if !diff.trim().is_empty() {
+                out.push_str("\n=== Commit Diff ===\n\n");
+                for line in diff.lines() {
+                    out.push_str(&format!("> {}\n", line));
+                }
+                out.push_str("\n");
+            }
+        }
+
+        out
+    }
+}
+
 #[derive(Debug, Clone)]
 pub struct CommitReview {
     pub sha: String,
@@ -175,5 +380,54 @@ mod tests {
         assert_eq!(strip_patch_prefix("[PATCH][v3] Double bracket"), "[v3] Double bracket");
         assert_eq!(strip_patch_prefix("No prefix here"), "No prefix here");
         assert_eq!(strip_patch_prefix("[NO-MATCH] Normal bracket"), "[NO-MATCH] Normal bracket");
+    }
+
+    #[test]
+    fn test_inline_review_rendering() {
+        let json_data = r#"{
+          "commit": "0bcf8e471daa283f4273d2538fe655ee47564d76",
+          "author": "Ivan T. Ivanov <iivanov@suse.de>",
+          "subject": "Revert \"tee: optee: Fix supplicant wait loop (CVE-2025-21871)\"",
+          "distro-commit": "c2450991414e40c2f39d15095a7514fc41579c53",
+          "summary": "This commit has a potential use-after-free that should be reviewed.",
+          "findings": [
+            {
+              "category": "CHANGE-2",
+              "type": "use-after-free",
+              "severity": "high",
+              "confidence": "high",
+              "message": "Reverting the fix for CVE-2025-21871 re-introduces a use-after-free vulnerability.",
+              "evidence": "    kfree(req); // a very long comment explaining that we are freeing req here which is very long indeed and goes over 80 characters"
+            }
+          ],
+          "review-time-seconds": 347.11,
+          "model": "gemma-4",
+          "input-tokens": 28523,
+          "output-tokens": 14236,
+          "total-tokens": 42759
+        }"#;
+
+        let inline_rev: InlineReview = serde_json::from_str(json_data).unwrap();
+        assert_eq!(inline_rev.commit, "0bcf8e471daa283f4273d2538fe655ee47564d76");
+        assert_eq!(inline_rev.suse_commit, Some("c2450991414e40c2f39d15095a7514fc41579c53".to_string()));
+
+        let rendered = inline_rev.render(Some("diff --git a/drivers/tee/optee/supp.c"));
+        assert!(rendered.contains("commit 0bcf8e471daa283f4273d2538fe655ee47564d76"));
+        assert!(rendered.contains("Author: Ivan T. Ivanov <iivanov@suse.de>"));
+        assert!(rendered.contains("distro-commit: c2450991414e40c2f39d15095a7514fc41579c53"));
+        assert!(rendered.contains("=== Commit Diff ==="));
+        assert!(rendered.contains("> diff --git a/drivers/tee/optee/supp.c"));
+        assert!(rendered.contains("=== Finding 1 ==="));
+        assert!(rendered.contains("Type: use-after-free"));
+        assert!(rendered.contains("Severity: high"));
+        assert!(rendered.contains("Confidence: high"));
+        assert!(rendered.contains("Message:"));
+        assert!(rendered.contains("Reverting the fix"));
+        assert!(rendered.contains("Evidence:"));
+        
+        // Assert on the folded/wrapped code line. 
+        // Index 80 in "    kfree(req); // a very long comment explaining..." should split 
+        // with prepended 4 spaces matching leading whitespace.
+        assert!(rendered.contains("    which is very long indeed"));
     }
 }

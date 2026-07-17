@@ -110,6 +110,7 @@ pub struct ContentViewerState {
     pub content: String,
     pub title: String,
     pub scroll_offset: usize,
+    pub horizontal_scroll_offset: usize,
     pub lines: Vec<String>,
     pub commit_info: HashMap<String, String>,
     pub is_downstream_view: bool,
@@ -145,6 +146,7 @@ impl ContentViewerState {
             content,
             title,
             scroll_offset: 0,
+            horizontal_scroll_offset: 0,
             lines,
             commit_info,
             is_downstream_view,
@@ -165,6 +167,7 @@ impl ContentViewerState {
             content,
             title,
             scroll_offset: 0,
+            horizontal_scroll_offset: 0,
             lines,
             commit_info,
             is_downstream_view,
@@ -555,6 +558,12 @@ impl TuiApp {
                     if s.scroll_offset < s.lines.len().saturating_sub(1) {
                         s.scroll_offset += 1;
                     }
+                }
+                KeyCode::Left => {
+                    s.horizontal_scroll_offset = s.horizontal_scroll_offset.saturating_sub(8);
+                }
+                KeyCode::Right => {
+                    s.horizontal_scroll_offset = s.horizontal_scroll_offset.saturating_add(8);
                 }
                 KeyCode::PageUp => {
                     s.scroll_offset = s.scroll_offset.saturating_sub(15);
@@ -1280,16 +1289,28 @@ impl TuiApp {
         }
     }
 
+    fn get_rendered_review(&self, model_id: &str, sha: &str) -> Option<String> {
+        let mut content = None;
+        if let Some(json_str) = self.state.db.get_review_content(model_id, sha, "review-inline.json") {
+            if let Ok(inline_review) = serde_json::from_str::<crate::models::InlineReview>(&json_str) {
+                let diff_content = self.git_viewer.show_downstream_diff(sha).ok();
+                content = Some(inline_review.render(diff_content.as_deref()));
+            }
+        }
+
+        if content.is_none() {
+            content = self.state.db.get_review_content(model_id, sha, "review-inline.txt");
+        }
+
+        content
+    }
+
     fn action_show_review(&mut self, commit: &CommitReview, index: usize) {
         self.screen_history.clear();
         if index < self.state.visible_models.len() {
             let model_id = &self.state.visible_models[index];
             if let Some(review) = commit.reviews.get(model_id) {
-                if let Some(mut content) =
-                    self.state
-                        .db
-                        .get_review_content(model_id, &commit.sha, "review-inline.txt")
-                {
+                if let Some(mut content) = self.get_rendered_review(model_id, &commit.sha) {
                     if review.has_fix_patches {
                         content = format!(
                             "AI Fix Patches: AVAILABLE (Press 'p' to view)\n\n{}",
@@ -1339,11 +1360,7 @@ impl TuiApp {
         if let Some(commit) = commit_opt {
             let model_id = &self.state.visible_models[index];
             if let Some(review) = commit.reviews.get(model_id) {
-                if let Some(mut content) =
-                    self.state
-                        .db
-                        .get_review_content(model_id, &commit.sha, "review-inline.txt")
-                {
+                if let Some(mut content) = self.get_rendered_review(model_id, &commit.sha) {
                     if review.has_fix_patches {
                         content = format!(
                             "AI Fix Patches: AVAILABLE (Press 'p' to view)\n\n{}",
@@ -1450,7 +1467,7 @@ impl TuiApp {
                 "h/?: Help | Enter: Cell Action | x: Toggle status | c: Downstream | s: SUSE | u: Upstream | d: Diff | 1-3: Review | Ctrl+A: Author | Ctrl+L: Severity | Ctrl+F: Search | Ctrl+B: Branch | m: Models | q: Quit"
             }
             ActiveScreen::ContentViewer(_) => {
-                "h/?: Help | Esc/q: Back | c: Downstream | s: SUSE | u: Upstream | d: Diff | p: Patches | 1-3: Review | Up/Down: Scroll"
+                "h/?: Help | Esc/q: Back | c: Downstream | s: SUSE | u: Upstream | d: Diff | p: Patches | 1-3: Review | Up/Down/Left/Right: Scroll"
             }
         };
         let footer = Paragraph::new(footer_text)
@@ -1839,6 +1856,12 @@ impl TuiApp {
                         "Input-tokens:",
                         "Output-tokens:",
                         "Total-tokens:",
+                        "Category:",
+                        "Type:",
+                        "Severity:",
+                        "Confidence:",
+                        "Message:",
+                        "Evidence:",
                     ];
 
                     let mut matched_tag = None;
@@ -1860,6 +1883,23 @@ impl TuiApp {
                                 Style::default()
                                     .fg(theme.findings_downstream_only_fg)
                                     .add_modifier(Modifier::UNDERLINED)
+                                    .add_modifier(Modifier::BOLD),
+                            )
+                        } else if tag == "Severity:" {
+                            let val_trimmed = after.trim().to_lowercase();
+                            let sev_color = if val_trimmed == "high" {
+                                theme.sev_high
+                            } else if val_trimmed == "medium" {
+                                theme.sev_med
+                            } else if val_trimmed == "low" {
+                                theme.sev_low
+                            } else {
+                                theme.default_text_fg
+                            };
+                            Span::styled(
+                                after.to_string(),
+                                Style::default()
+                                    .fg(sev_color)
                                     .add_modifier(Modifier::BOLD),
                             )
                         } else {
@@ -1915,6 +1955,7 @@ impl TuiApp {
                     .fg(theme.default_text_fg)
                     .bg(theme.default_bg),
             )
+            .scroll((0, s.horizontal_scroll_offset as u16))
             .block(
                 Block::default()
                     .borders(Borders::ALL)

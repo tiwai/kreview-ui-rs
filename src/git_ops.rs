@@ -47,9 +47,44 @@ impl GitViewer {
         }
     }
 
+    fn show_commit_diff_only(&self, repo: &Path, sha: &str) -> Result<String, String> {
+        if !repo.exists() {
+            return Err(format!("Error: Repository not found at {:?}", repo));
+        }
+
+        let output = Command::new("git")
+            .arg("-C")
+            .arg(repo)
+            .arg("show")
+            .arg("--format=")
+            .arg(sha)
+            .output();
+
+        match output {
+            Ok(out) => {
+                if out.status.success() {
+                    Ok(String::from_utf8_lossy(&out.stdout).into_owned())
+                } else {
+                    Err(format!(
+                        "Error: git show --format= failed\n{}",
+                        String::from_utf8_lossy(&out.stderr)
+                    ))
+                }
+            }
+            Err(e) => Err(format!("Error running git show --format=: {}", e)),
+        }
+    }
+
     pub fn show_downstream(&self, sha: &str) -> Result<String, String> {
         match &self.downstream_repo {
             Some(repo) => self.show_commit(repo, sha),
+            None => Err("Error: downstream_repo not configured".to_string()),
+        }
+    }
+
+    pub fn show_downstream_diff(&self, sha: &str) -> Result<String, String> {
+        match &self.downstream_repo {
+            Some(repo) => self.show_commit_diff_only(repo, sha),
             None => Err("Error: downstream_repo not configured".to_string()),
         }
     }
