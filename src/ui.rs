@@ -11,7 +11,7 @@ use std::collections::HashMap;
 use std::io;
 
 use crate::git_ops::GitViewer;
-use crate::models::{CommitReview, ReviewMetadata, Severity, Status};
+use crate::models::{CommitReview, ReviewMetadata, Severity, Status, strip_patch_prefix};
 use crate::state::AppState;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -954,10 +954,7 @@ impl TuiApp {
             Status::Ok => "✅",
             Status::Bad => "❌",
         };
-        let mut subject = commit.subject.clone();
-        if subject.starts_with("[PATCH]") {
-            subject = subject[7..].trim().to_string();
-        }
+        let subject = strip_patch_prefix(&commit.subject);
         content_parts.push(format!("{} {}\n", status_emoji, subject));
 
         if let Some(note_text) = self.state.get_commit_note(&commit.sha) {
@@ -1503,10 +1500,7 @@ impl TuiApp {
                 Status::Bad => "❌",
             };
 
-            let mut subject = commit.subject.clone();
-            if subject.starts_with("[PATCH]") {
-                subject = subject[7..].trim().to_string();
-            }
+            let mut subject = strip_patch_prefix(&commit.subject);
             if subject.chars().count() > 50 {
                 subject = subject.chars().take(47).collect();
                 subject.push_str("...");
@@ -2813,5 +2807,41 @@ mod tests {
         assert_eq!(state_distro.commit_info.get("downstream_sha").unwrap(), "1234567890abcdef");
         assert_eq!(state_distro.commit_info.get("suse_sha").unwrap(), "fedcba654321");
         assert_eq!(state_distro.commit_info.get("upstream_sha").unwrap(), "9876543210");
+    }
+
+    #[test]
+    fn test_subject_patch_prefix_stripped_in_downstream_view() {
+        let mut config = Config::default();
+        config.database_path = PathBuf::from("nonexistent_db_path_for_test");
+        let mut state = AppState::new(config);
+
+        let commit = CommitReview {
+            sha: "2222222222222222222222222222222222222222".to_string(),
+            subject: "[PATCH 1/1] Fix memory leak".to_string(),
+            author: "Author A".to_string(),
+            suse_commit: None,
+            upstream_commit: None,
+            reviews: std::collections::HashMap::new(),
+            status: Status::Unread,
+        };
+
+        state.commits = vec![commit.clone()];
+        state.filtered_commits = vec![commit.clone()];
+
+        let mut app = TuiApp::new(state);
+        app.action_show_downstream(&commit);
+
+        if let ActiveScreen::ContentViewer(s) = &app.active_screen {
+            assert!(
+                s.content.contains("Fix memory leak"),
+                "Downstream view content should contain stripped subject 'Fix memory leak'"
+            );
+            assert!(
+                !s.content.contains("[PATCH 1/1]"),
+                "Downstream view content should not contain the '[PATCH 1/1]' prefix"
+            );
+        } else {
+            panic!("Expected ActiveScreen to be ContentViewer");
+        }
     }
 }

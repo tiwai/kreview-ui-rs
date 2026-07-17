@@ -103,6 +103,24 @@ pub struct Branch {
     pub models: Vec<String>,
 }
 
+/// Helper function to strip patch prefixes like `[PATCH]`, `[PATCH 1/1]`, etc. from a commit subject.
+pub fn strip_patch_prefix(subject: &str) -> String {
+    let mut current = subject.trim();
+    while current.starts_with('[') {
+        if let Some(close_idx) = current.find(']') {
+            let inside = &current[1..close_idx];
+            if inside.to_uppercase().contains("PATCH") {
+                current = current[close_idx + 1..].trim();
+            } else {
+                break;
+            }
+        } else {
+            break;
+        }
+    }
+    current.to_string()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -145,5 +163,17 @@ mod tests {
 
         assert_eq!(meta_suse.suse_commit, Some("abcdef".to_string()));
         assert_eq!(meta_distro.suse_commit, Some("abcdef".to_string()));
+    }
+
+    #[test]
+    fn test_strip_patch_prefix() {
+        assert_eq!(strip_patch_prefix("[PATCH] Fix typo"), "Fix typo");
+        assert_eq!(strip_patch_prefix("[PATCH 1/1] Fix bug"), "Fix bug");
+        assert_eq!(strip_patch_prefix("[PATCH v2 3/5] Add feature"), "Add feature");
+        assert_eq!(strip_patch_prefix("[RFC PATCH] Test patch"), "Test patch");
+        assert_eq!(strip_patch_prefix("[RFC] [PATCH] Another test"), "[RFC] [PATCH] Another test");
+        assert_eq!(strip_patch_prefix("[PATCH][v3] Double bracket"), "[v3] Double bracket");
+        assert_eq!(strip_patch_prefix("No prefix here"), "No prefix here");
+        assert_eq!(strip_patch_prefix("[NO-MATCH] Normal bracket"), "[NO-MATCH] Normal bracket");
     }
 }
