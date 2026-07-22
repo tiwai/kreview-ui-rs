@@ -90,7 +90,7 @@ pub struct Finding {
     #[serde(rename = "type")]
     pub finding_type: Option<String>,
     pub severity: Option<Severity>,
-    pub confidence: Option<String>,
+    pub confidence: Option<serde_json::Value>,
     pub message: Option<String>,
     pub evidence: Option<String>,
 }
@@ -281,7 +281,12 @@ impl InlineReview {
                     out.push_str(&format!("Severity: {}\n", sev.as_str()));
                 }
                 if let Some(ref conf) = finding.confidence {
-                    out.push_str(&format!("Confidence: {}\n", conf));
+                    let conf_str = match conf {
+                        serde_json::Value::String(s) => s.clone(),
+                        serde_json::Value::Number(n) => n.to_string(),
+                        _ => conf.to_string(),
+                    };
+                    out.push_str(&format!("Confidence: {}\n", conf_str));
                 }
 
                 if let Some(ref msg) = finding.message {
@@ -517,5 +522,71 @@ mod tests {
             "    kfree(req); // a very long comment explaining that we are freeing req here"
         ));
         assert!(!rendered_100.contains("\n    explaining"));
+    }
+
+    #[test]
+    fn test_inline_review_numeric_confidence() {
+        let json_data = r#"{
+          "commit": "0bcf8e471daa283f4273d2538fe655ee47564d76",
+          "author": "Ivan T. Ivanov <iivanov@suse.de>",
+          "subject": "Revert \"tee: optee: Fix supplicant wait loop (CVE-2025-21871)\"",
+          "findings": [
+            {
+              "category": "CHANGE-2",
+              "type": "use-after-free",
+              "severity": "high",
+              "confidence": 0.95,
+              "message": "Reverting the fix for CVE-2025-21871.",
+              "evidence": "    kfree(req);"
+            }
+          ],
+          "review-time-seconds": 12.0,
+          "model": "gemma-4",
+          "input-tokens": 100,
+          "output-tokens": 100,
+          "total-tokens": 200
+        }"#;
+
+        let inline_rev: InlineReview = serde_json::from_str(json_data).unwrap();
+        let rendered = inline_rev.render_with_width(None, 80);
+        assert!(rendered.contains("Confidence: 0.95"));
+    }
+
+    #[test]
+    fn test_diagnose_db_json() {
+        let db_path = std::path::Path::new("/home/tiwai/tmp/kreviews/db");
+        if !db_path.exists() {
+            return;
+        }
+        let mut checked = 0;
+        let mut errors = Vec::new();
+        fn visit_dirs(
+            dir: &std::path::Path,
+            checked: &mut usize,
+            errors: &mut Vec<String>,
+        ) {
+            if dir.is_dir() {
+                for entry in std::fs::read_dir(dir).unwrap() {
+                    let entry = entry.unwrap();
+                    let path = entry.path();
+                    if path.is_dir() {
+                        visit_dirs(&path, checked, errors);
+                    } else if path.is_file() && path.file_name().unwrap() == "review-inline.json" {
+                        *checked += 1;
+                        let content = std::fs::read_to_string(&path).unwrap();
+                        match serde_json::from_str::<InlineReview>(&content) {
+                            Ok(_) => {}
+                            Err(e) => {
+                                errors.push(format!("{}: {}", path.display(), e));
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        visit_dirs(db_path, &mut checked, &mut errors);
+        if !errors.is_empty() {
+            panic!("Checked {} files, failed {} files:\n{}", checked, errors.len(), errors.join("\n"));
+        }
     }
 }
