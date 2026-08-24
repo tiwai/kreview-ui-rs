@@ -9,6 +9,7 @@ use ratatui::{
 };
 use std::collections::HashMap;
 use std::io;
+use std::time::Instant;
 
 use crate::git_ops::GitViewer;
 use crate::models::{strip_patch_prefix, CommitReview, ReviewMetadata, Severity, Status};
@@ -245,6 +246,7 @@ pub struct TuiApp {
     pub selected_row: usize,
     pub selected_col: usize,
     pub table_state: TableState,
+    pub status_message: Option<(String, Instant)>,
 }
 
 impl TuiApp {
@@ -264,6 +266,7 @@ impl TuiApp {
             selected_row: 0,
             selected_col: 0,
             table_state: TableState::default().with_selected(Some(0)),
+            status_message: None,
         }
     }
 
@@ -543,6 +546,22 @@ impl TuiApp {
                 ActiveScreen::ContentViewer(cv) => cv.clone(),
                 _ => unreachable!(),
             };
+
+            // Ctrl+S: save current view content to a plain-text file
+            if key.modifiers.contains(KeyModifiers::CONTROL) && key.code == KeyCode::Char('s') {
+                match Self::save_content_to_file(&s) {
+                    Ok(path) => {
+                        self.status_message =
+                            Some((format!("Saved to: {}", path), Instant::now()));
+                    }
+                    Err(e) => {
+                        self.status_message =
+                            Some((format!("Save failed: {}", e), Instant::now()));
+                    }
+                }
+                self.active_screen = ActiveScreen::ContentViewer(s);
+                return false;
+            }
 
             let mut review_index = None;
             let mut go_back = false;
@@ -1435,6 +1454,28 @@ impl TuiApp {
         }
     }
 
+    fn save_content_to_file(s: &ContentViewerState) -> io::Result<String> {
+        let raw = s
+            .content
+            .strip_prefix("AI Fix Patches: AVAILABLE (Press 'p' to view)\n\n")
+            .unwrap_or(&s.content);
+        let plain = strip_markup(raw);
+
+        // Build a filesystem-safe filename from the title
+        let sanitized: String = s
+            .title
+            .chars()
+            .map(|c| if c.is_alphanumeric() { c } else { '-' })
+            .collect::<String>()
+            .to_lowercase();
+        // Collapse consecutive dashes and trim trailing/leading dashes
+        let parts: Vec<&str> = sanitized.split('-').filter(|p| !p.is_empty()).collect();
+        let filename = format!("{}.txt", parts.join("-"));
+
+        std::fs::write(&filename, plain)?;
+        Ok(filename)
+    }
+
     fn draw(&mut self, f: &mut Frame) {
         self.validate_selection();
         let theme_type = self.theme();
@@ -1532,14 +1573,25 @@ impl TuiApp {
             }
         }
 
+        // Expire status message after 3 seconds
+        let elapsed = self.status_message.as_ref().map(|(_, t)| t.elapsed().as_secs());
+        if elapsed.map(|e| e >= 3).unwrap_or(false) {
+            self.status_message = None;
+        }
+
         // Footer
-        let footer_text = match self.active_screen {
+        let default_footer: &str = match self.active_screen {
             ActiveScreen::MainTable => {
                 "h/?: Help | Enter: Cell Action | x: Toggle status | c: Downstream | s: SUSE | u: Upstream | d: Diff | 1-3: Review | Ctrl+A: Author | Ctrl+L: Severity | Ctrl+F: Search | Ctrl+B: Branch | m: Models | q: Quit"
             }
             ActiveScreen::ContentViewer(_) => {
-                "h/?: Help | Esc/q: Back | c: Downstream | s: SUSE | u: Upstream | d: Diff | p: Patches | 1-3: Review | Up/Down/Left/Right: Scroll"
+                "h/?: Help | Esc/q: Back | Ctrl+S: Save | c: Downstream | s: SUSE | u: Upstream | d: Diff | p: Patches | 1-3: Review | Up/Down/Left/Right: Scroll"
             }
+        };
+        let footer_text: &str = if let Some((ref msg, _)) = self.status_message {
+            msg.as_str()
+        } else {
+            default_footer
         };
         let footer = Paragraph::new(footer_text)
             .bg(theme.header_bg)
@@ -2279,6 +2331,7 @@ impl TuiApp {
                 );
                 add_item(Some("d"), "Show diff (Down vs Up)");
                 add_item(Some("1 - 5"), "Show review for model 1, 2, 3, etc.");
+                add_item(Some("Ctrl+S"), "Save current view to a text file (Viewer)");
 
                 add_item(None, "Global");
                 add_item(Some("h / ?"), "Toggle this help screen");
@@ -2358,6 +2411,45 @@ fn centered_rect(percent_x: u16, percent_y: u16, r: Rect) -> Rect {
             Constraint::Length((r.width.saturating_sub(percent_x)) / 2),
         ])
         .split(popup_layout[1])[1]
+}
+
+fn strip_markup(content: &str) -> String {
+    let mut result = String::with_capacity(content.len());
+    let mut remaining = content;
+
+    while !remaining.is_empty() {
+        if remaining.starts_with("@BOLD_START@") {
+            remaining = &remaining[12..];
+        } else if remaining.starts_with("@BOLD_END@") {
+            remaining = &remaining[10..];
+        } else if remaining.starts_with("@KEY[") {
+            // @KEY[N]@ → [N]
+            if let Some(end_idx) = remaining[5..].find("]@") {
+                let key = &remaining[5..5 + end_idx];
+                result.push('[');
+                result.push_str(key);
+                result.push(']');
+                remaining = &remaining[5 + end_idx + 2..];
+            } else {
+                result.push_str(&remaining[..5]);
+                remaining = &remaining[5..];
+            }
+        } else {
+            let next = [
+                remaining.find("@BOLD_START@"),
+                remaining.find("@BOLD_END@"),
+                remaining.find("@KEY["),
+            ]
+            .iter()
+            .filter_map(|o| *o)
+            .min()
+            .unwrap_or(remaining.len());
+            result.push_str(&remaining[..next]);
+            remaining = &remaining[next..];
+        }
+    }
+
+    result
 }
 
 fn render_note_text_with_cursor(
