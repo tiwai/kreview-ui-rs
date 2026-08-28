@@ -2811,6 +2811,7 @@ mod tests {
                 suse_commit: None,
                 upstream_commit: None,
                 has_pre_verification: false,
+                has_verified_result: false,
                 findings_downstream_only: 0,
                 has_fix_patches: true,
             },
@@ -3082,6 +3083,7 @@ mod tests {
             suse_commit: None,
             upstream_commit: None,
             has_pre_verification: false,
+            has_verified_result: false,
             findings_downstream_only: 0,
             has_fix_patches: false,
         };
