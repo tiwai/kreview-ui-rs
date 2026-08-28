@@ -68,6 +68,8 @@ pub struct ReviewMetadata {
     #[serde(skip)]
     pub has_pre_verification: bool,
     #[serde(skip)]
+    pub has_verified_result: bool,
+    #[serde(skip)]
     pub findings_downstream_only: u32,
     #[serde(skip)]
     pub has_fix_patches: bool,

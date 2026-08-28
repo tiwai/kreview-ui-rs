@@ -41,6 +41,7 @@ pub struct ThemeStyles {
     pub sev_med: Color,
     pub sev_high: Color,
     pub pre_verification_fg: Color,
+    pub verified_result_fg: Color,
     pub findings_downstream_only_fg: Color,
     pub issue_count_fg: Color,
     pub issue_count_bg: Color,
@@ -70,6 +71,7 @@ impl ThemeStyles {
                 sev_med: Color::LightYellow,
                 sev_high: Color::Red,
                 pre_verification_fg: Color::Yellow,
+                verified_result_fg: Color::Magenta,
                 findings_downstream_only_fg: Color::LightBlue,
                 issue_count_fg: Color::LightRed,
                 issue_count_bg: Color::Rgb(50, 20, 20),
@@ -95,6 +97,7 @@ impl ThemeStyles {
                 sev_med: Color::LightRed,
                 sev_high: Color::Red,
                 pre_verification_fg: Color::Yellow,
+                verified_result_fg: Color::Magenta,
                 findings_downstream_only_fg: Color::Blue,
                 issue_count_fg: Color::Red,
                 issue_count_bg: Color::Rgb(255, 220, 220),
@@ -1009,6 +1012,7 @@ impl TuiApp {
                 model_printed: String,
                 issues: String,
                 pre_verified: String,
+                verified: String,
                 downstream_only: String,
                 severity: String,
                 patches: String,
@@ -1040,6 +1044,11 @@ impl TuiApp {
                     } else {
                         "-".to_string()
                     };
+                    let verified = if review.has_verified_result {
+                        "yes".to_string()
+                    } else {
+                        "-".to_string()
+                    };
                     let downstream_only = review.findings_downstream_only.to_string();
                     let severity = if review.issue_severity_score != Severity::None {
                         review.issue_severity_score.as_str().to_uppercase()
@@ -1058,6 +1067,7 @@ impl TuiApp {
                         model_printed,
                         issues,
                         pre_verified,
+                        verified,
                         downstream_only,
                         severity,
                         patches,
@@ -1070,6 +1080,7 @@ impl TuiApp {
                 let h_model = "Model";
                 let h_issues = "Issues";
                 let h_pre_verify = "Pre-verify";
+                let h_verified = "Verified";
                 let h_downstream = "Downstream";
                 let h_severity = "Severity";
                 let h_patches = "Patches";
@@ -1077,6 +1088,7 @@ impl TuiApp {
                 let mut w_model = h_model.len();
                 let mut w_issues = h_issues.len();
                 let mut w_pre_verify = h_pre_verify.len();
+                let mut w_verified = h_verified.len();
                 let mut w_downstream = h_downstream.len();
                 let mut w_severity = h_severity.len();
                 let mut w_patches = h_patches.len();
@@ -1085,6 +1097,7 @@ impl TuiApp {
                     w_model = w_model.max(r.model_printed.len());
                     w_issues = w_issues.max(r.issues.len());
                     w_pre_verify = w_pre_verify.max(r.pre_verified.len());
+                    w_verified = w_verified.max(r.verified.len());
                     w_downstream = w_downstream.max(r.downstream_only.len());
                     w_severity = w_severity.max(r.severity.len());
                     w_patches = w_patches.max(r.patches.len());
@@ -1092,10 +1105,11 @@ impl TuiApp {
 
                 // Construct top border
                 let top_border = format!(
-                    "┌─{}─┬─{}─┬─{}─┬─{}─┬─{}─┬─{}─┐\n",
+                    "┌─{}─┬─{}─┬─{}─┬─{}─┬─{}─┬─{}─┬─{}─┐\n",
                     "─".repeat(w_model),
                     "─".repeat(w_issues),
                     "─".repeat(w_pre_verify),
+                    "─".repeat(w_verified),
                     "─".repeat(w_downstream),
                     "─".repeat(w_severity),
                     "─".repeat(w_patches)
@@ -1104,16 +1118,18 @@ impl TuiApp {
 
                 // Construct header
                 let header_line = format!(
-                    "│ {:<w_model$} │ {:<w_issues$} │ {:<w_pre_verify$} │ {:<w_downstream$} │ {:<w_severity$} │ {:<w_patches$} │\n",
+                    "│ {:<w_model$} │ {:<w_issues$} │ {:<w_pre_verify$} │ {:<w_verified$} │ {:<w_downstream$} │ {:<w_severity$} │ {:<w_patches$} │\n",
                     h_model,
                     h_issues,
                     h_pre_verify,
+                    h_verified,
                     h_downstream,
                     h_severity,
                     h_patches,
                     w_model = w_model,
                     w_issues = w_issues,
                     w_pre_verify = w_pre_verify,
+                    w_verified = w_verified,
                     w_downstream = w_downstream,
                     w_severity = w_severity,
                     w_patches = w_patches
@@ -1122,10 +1138,11 @@ impl TuiApp {
 
                 // Construct separator border
                 let sep_border = format!(
-                    "├─{}─┼─{}─┼─{}─┼─{}─┼─{}─┼─{}─┤\n",
+                    "├─{}─┼─{}─┼─{}─┼─{}─┼─{}─┼─{}─┼─{}─┤\n",
                     "─".repeat(w_model),
                     "─".repeat(w_issues),
                     "─".repeat(w_pre_verify),
+                    "─".repeat(w_verified),
                     "─".repeat(w_downstream),
                     "─".repeat(w_severity),
                     "─".repeat(w_patches)
@@ -1138,15 +1155,17 @@ impl TuiApp {
                     let formatted_model = format!("{}{}", r.model_markup, padding_spaces);
 
                     let row_line = format!(
-                        "│ {} │ {:<w_issues$} │ {:<w_pre_verify$} │ {:<w_downstream$} │ {:<w_severity$} │ {:<w_patches$} │\n",
+                        "│ {} │ {:<w_issues$} │ {:<w_pre_verify$} │ {:<w_verified$} │ {:<w_downstream$} │ {:<w_severity$} │ {:<w_patches$} │\n",
                         formatted_model,
                         r.issues,
                         r.pre_verified,
+                        r.verified,
                         r.downstream_only,
                         r.severity,
                         r.patches,
                         w_issues = w_issues,
                         w_pre_verify = w_pre_verify,
+                        w_verified = w_verified,
                         w_downstream = w_downstream,
                         w_severity = w_severity,
                         w_patches = w_patches
@@ -1162,10 +1181,11 @@ impl TuiApp {
 
                 // Construct bottom border
                 let bottom_border = format!(
-                    "└─{}─┴─{}─┴─{}─┴─{}─┴─{}─┴─{}─┘\n",
+                    "└─{}─┴─{}─┴─{}─┴─{}─┴─{}─┴─{}─┴─{}─┘\n",
                     "─".repeat(w_model),
                     "─".repeat(w_issues),
                     "─".repeat(w_pre_verify),
+                    "─".repeat(w_verified),
                     "─".repeat(w_downstream),
                     "─".repeat(w_severity),
                     "─".repeat(w_patches)
@@ -1764,6 +1784,11 @@ impl TuiApp {
         // Pre-verification marker
         if review.has_pre_verification {
             spans.push(Span::styled("*", base_style.fg(theme.pre_verification_fg)));
+        }
+
+        // Verified result marker
+        if review.has_verified_result {
+            spans.push(Span::styled("V", base_style.fg(theme.verified_result_fg).add_modifier(Modifier::BOLD)));
         }
 
         // Downstream only findings [N]

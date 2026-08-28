@@ -131,6 +131,7 @@ impl ReviewDatabase {
 
         // Check for optional files
         metadata.has_pre_verification = review_dir.join("review-pre-verification.json").exists();
+        metadata.has_verified_result = review_dir.join("verified-result.json").exists();
         metadata.has_fix_patches = review_dir.join("review-fix-patches.diff").exists();
 
         // Extract findings_downstream_only from pre-verification
