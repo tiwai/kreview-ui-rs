@@ -121,6 +121,132 @@ pub struct InlineReview {
     pub total_tokens: u64,
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct VerifiedFinding {
+    pub category: Option<String>,
+    #[serde(rename = "type")]
+    pub finding_type: Option<String>,
+    pub severity: Option<Severity>,
+    pub confidence: Option<serde_json::Value>,
+    pub message: Option<String>,
+    pub evidence: Option<String>,
+    pub upstream_status: Option<String>,
+    // Older format
+    pub verified_status: Option<String>,
+    pub verification_comments: Option<String>,
+    // Newer format
+    #[serde(rename = "re-verification-status")]
+    pub re_verification_status: Option<String>,
+    #[serde(rename = "re-verification-comment")]
+    pub re_verification_comment: Option<String>,
+}
+
+impl VerifiedFinding {
+    pub fn status(&self) -> Option<&str> {
+        self.re_verification_status.as_deref()
+            .or(self.verified_status.as_deref())
+    }
+
+    pub fn comment(&self) -> Option<&str> {
+        self.re_verification_comment.as_deref()
+            .or(self.verification_comments.as_deref())
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct VerifiedResult {
+    pub commit: String,
+    pub model: String,
+    #[serde(rename = "re-verified-by")]
+    pub re_verified_by: Option<String>,
+    #[serde(rename = "re-verified-date")]
+    pub re_verified_date: Option<String>,
+    #[serde(rename = "re-verification-summary")]
+    pub re_verification_summary: Option<String>,
+    pub verified: Option<bool>,
+    #[serde(rename = "issues-found")]
+    pub issues_found: Option<u32>,
+    #[serde(default)]
+    pub findings: Vec<VerifiedFinding>,
+}
+
+impl VerifiedResult {
+    pub fn render_with_width(&self, width: usize) -> String {
+        let mut out = String::new();
+        out.push_str(&format!("commit {}\n", self.commit));
+        out.push_str(&format!("Re-verification-model: {}\n", self.model));
+
+        if let Some(ref by) = self.re_verified_by {
+            out.push_str(&format!("Re-verified-by: {}\n", by));
+        }
+        if let Some(ref date) = self.re_verified_date {
+            out.push_str(&format!("Re-verified-date: {}\n", date));
+        }
+        if let Some(v) = self.verified {
+            out.push_str(&format!("Verified: {}\n", v));
+        }
+        if let Some(n) = self.issues_found {
+            out.push_str(&format!("Issues-found: {}\n", n));
+        }
+
+        if let Some(ref summary) = self.re_verification_summary {
+            out.push_str("\n=== Re-verification Summary ===\n");
+            out.push_str(&wrap_text(summary, width));
+            out.push('\n');
+        }
+
+        if !self.findings.is_empty() {
+            out.push_str("\n=== Findings ===\n");
+            for (i, finding) in self.findings.iter().enumerate() {
+                out.push_str(&format!("\n=== Finding {} ===\n", i + 1));
+
+                if let Some(ref cat) = finding.category {
+                    out.push_str(&format!("Category: {}\n", cat));
+                }
+                if let Some(ref f_type) = finding.finding_type {
+                    out.push_str(&format!("Type: {}\n", f_type));
+                }
+                if let Some(sev) = finding.severity {
+                    out.push_str(&format!("Severity: {}\n", sev.as_str()));
+                }
+                if let Some(ref conf) = finding.confidence {
+                    let conf_str = match conf {
+                        serde_json::Value::String(s) => s.clone(),
+                        serde_json::Value::Number(n) => n.to_string(),
+                        _ => conf.to_string(),
+                    };
+                    out.push_str(&format!("Confidence: {}\n", conf_str));
+                }
+                if let Some(ref us) = finding.upstream_status {
+                    out.push_str(&format!("Upstream-status: {}\n", us));
+                }
+
+                if let Some(ref msg) = finding.message {
+                    out.push_str("\nMessage:\n");
+                    out.push_str(&wrap_text(msg, width));
+                    out.push('\n');
+                }
+                if let Some(ref ev) = finding.evidence {
+                    out.push_str("\nEvidence:\n");
+                    out.push_str(&wrap_code(ev, width));
+                    out.push('\n');
+                }
+
+                if let Some(status) = finding.status() {
+                    out.push_str(&format!("\nVerification-status: {}\n", status));
+                }
+                if let Some(comment) = finding.comment() {
+                    out.push_str("\nVerification-comment:\n");
+                    out.push_str(&wrap_text(comment, width));
+                    out.push('\n');
+                }
+            }
+        }
+
+        out
+    }
+}
+
 pub fn wrap_text(text: &str, max_width: usize) -> String {
     let mut wrapped = String::new();
     for (i, paragraph) in text.split('\n').enumerate() {

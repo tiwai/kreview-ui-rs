@@ -12,7 +12,7 @@ use std::io;
 use std::time::Instant;
 
 use crate::git_ops::GitViewer;
-use crate::models::{strip_patch_prefix, CommitReview, ReviewMetadata, Severity, Status};
+use crate::models::{strip_patch_prefix, CommitReview, ReviewMetadata, Severity, Status, VerifiedResult};
 use crate::state::AppState;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -573,6 +573,7 @@ impl TuiApp {
             let mut show_upstream = None;
             let mut show_diff = None;
             let mut show_patches: Option<(String, String)> = None;
+            let mut show_verified: Option<(String, String)> = None;
             let mut show_help = false;
             let mut edit_note = false;
 
@@ -636,6 +637,14 @@ impl TuiApp {
                         s.commit_info.get("model_id").cloned(),
                     ) {
                         show_patches = Some((sha, model_id));
+                    }
+                }
+                KeyCode::Char('v') => {
+                    if let (Some(sha), Some(model_id)) = (
+                        s.commit_info.get("downstream_sha").cloned(),
+                        s.commit_info.get("model_id").cloned(),
+                    ) {
+                        show_verified = Some((sha, model_id));
                     }
                 }
                 KeyCode::Char('h') | KeyCode::Char('?') => {
@@ -719,6 +728,12 @@ impl TuiApp {
                 let commit_opt = self.state.commits.iter().find(|c| c.sha == sha).cloned();
                 if let Some(commit) = commit_opt {
                     self.action_show_patches_for_model(&commit, &model_id);
+                }
+            } else if let Some((sha, model_id)) = show_verified {
+                let commit_opt = self.state.commits.iter().find(|c| c.sha == sha).cloned();
+                if let Some(commit) = commit_opt {
+                    self.screen_history.push(self.active_screen.clone());
+                    self.action_show_verified_result(&commit, &model_id);
                 }
             } else if let Some(idx) = review_index {
                 if let Some(sha) = s.commit_info.get("downstream_sha").cloned() {
@@ -926,6 +941,17 @@ impl TuiApp {
                     KeyCode::Char('d') => {
                         if let Some(commit) = self.get_selected_commit() {
                             self.action_show_diff(&commit);
+                        }
+                    }
+                    KeyCode::Char('v') => {
+                        if let Some(commit) = self.get_selected_commit() {
+                            if self.selected_col > 0 {
+                                let model_idx = self.selected_col - 1;
+                                if model_idx < self.state.visible_models.len() {
+                                    let model_id = self.state.visible_models[model_idx].clone();
+                                    self.action_show_verified_result(&commit, &model_id);
+                                }
+                            }
                         }
                     }
                     KeyCode::Char('1') => {
@@ -1337,6 +1363,45 @@ impl TuiApp {
         }
     }
 
+    fn action_show_verified_result(&mut self, commit: &CommitReview, model_id: &str) {
+        let Some(review) = commit.reviews.get(model_id) else { return };
+        if !review.has_verified_result {
+            return;
+        }
+        let Some(json_str) = self.state.db.get_review_content(model_id, &commit.sha, "verified-result.json") else { return };
+        let Ok(verified) = serde_json::from_str::<VerifiedResult>(&json_str) else { return };
+
+        let width = if let Ok((cols, _)) = crossterm::terminal::size() {
+            (cols.saturating_sub(2) as usize).max(40)
+        } else {
+            80
+        };
+        let content = verified.render_with_width(width);
+
+        let models_map = self.state.db.load_models();
+        let name = models_map
+            .get(model_id)
+            .map(|m| m.description.as_str())
+            .unwrap_or(model_id);
+
+        let mut commit_info = HashMap::new();
+        commit_info.insert("downstream_sha".to_string(), commit.sha.clone());
+        commit_info.insert("model_id".to_string(), model_id.to_string());
+        if let Some(ref suse) = commit.suse_commit {
+            commit_info.insert("suse_sha".to_string(), suse.clone());
+        }
+        if let Some(ref upstream) = commit.upstream_commit {
+            commit_info.insert("upstream_sha".to_string(), upstream.clone());
+        }
+
+        self.active_screen = ActiveScreen::ContentViewer(ContentViewerState::new_with_info(
+            content,
+            format!("Verified Result: {} - {}", name, &commit.sha[..12]),
+            false,
+            commit_info,
+        ));
+    }
+
     fn get_rendered_review_details(
         &self,
         model_id: &str,
@@ -1605,7 +1670,7 @@ impl TuiApp {
                 "h/?: Help | Enter: Cell Action | x: Toggle status | c: Downstream | s: SUSE | u: Upstream | d: Diff | 1-3: Review | Ctrl+A: Author | Ctrl+L: Severity | Ctrl+F: Search | Ctrl+B: Branch | m: Models | q: Quit"
             }
             ActiveScreen::ContentViewer(_) => {
-                "h/?: Help | Esc/q: Back | Ctrl+S: Save | c: Downstream | s: SUSE | u: Upstream | d: Diff | p: Patches | 1-3: Review | Up/Down/Left/Right: Scroll"
+                "h/?: Help | Esc/q: Back | Ctrl+S: Save | c: Downstream | s: SUSE | u: Upstream | d: Diff | p: Patches | v: Verified | 1-3: Review | Up/Down/Left/Right: Scroll"
             }
         };
         let footer_text: &str = if let Some((ref msg, _)) = self.status_message {
@@ -2005,6 +2070,9 @@ impl TuiApp {
                         "Findings-downstream-only:",
                         "Review-time:",
                         "Review-model:",
+                        "Re-verification-model:",
+                        "Re-verified-by:",
+                        "Re-verified-date:",
                         "Input-tokens:",
                         "Output-tokens:",
                         "Total-tokens:",
@@ -2012,6 +2080,9 @@ impl TuiApp {
                         "Type:",
                         "Severity:",
                         "Confidence:",
+                        "Upstream-status:",
+                        "Verification-status:",
+                        "Verification-comment:",
                         "Message:",
                         "Evidence:",
                     ];
@@ -2028,7 +2099,10 @@ impl TuiApp {
                         let before = &line[..idx];
                         let after = &line[idx + tag.len()..];
 
-                        let is_sha_tag = tag.contains("commit") || tag.contains("Verified");
+                        let is_sha_tag = tag == "suse-commit:"
+                            || tag == "distro-commit:"
+                            || tag == "Git-commit:"
+                            || tag == "Verified-against:";
                         let after_span = if is_sha_tag {
                             Span::styled(
                                 after.to_string(),
@@ -2051,6 +2125,19 @@ impl TuiApp {
                             Span::styled(
                                 after.to_string(),
                                 Style::default().fg(sev_color).add_modifier(Modifier::BOLD),
+                            )
+                        } else if tag == "Verification-status:" {
+                            let val_trimmed = after.trim().to_lowercase();
+                            let color = if val_trimmed == "confirmed" {
+                                theme.sev_high
+                            } else if val_trimmed == "false-positive" || val_trimmed == "rejected" {
+                                theme.diff_add_fg
+                            } else {
+                                theme.default_text_fg
+                            };
+                            Span::styled(
+                                after.to_string(),
+                                Style::default().fg(color).add_modifier(Modifier::BOLD),
                             )
                         } else {
                             Span::styled(
