@@ -31,11 +31,12 @@ pub struct AppState {
 impl AppState {
     pub fn new(config: Config) -> Self {
         let db = ReviewDatabase::new(config.database_path.clone());
+        let visible_models = config.models.clone().unwrap_or_default();
         let mut state = AppState {
             config,
             db,
             current_branch: None,
-            visible_models: Vec::new(),
+            visible_models,
             commits: Vec::new(),
             filtered_commits: Vec::new(),
             author_filter: None,
@@ -68,10 +69,21 @@ impl AppState {
 
         // Keep previously visible models if they are valid for this branch
         if !previous_visible.is_empty() {
-            let preserved: Vec<String> = previous_visible
-                .into_iter()
-                .filter(|m| valid_models.contains(m))
-                .collect();
+            let mut preserved = Vec::new();
+            let mut unknown = Vec::new();
+            for m in previous_visible {
+                if valid_models.contains(&m) {
+                    preserved.push(m);
+                } else {
+                    unknown.push(m);
+                }
+            }
+            if !unknown.is_empty() {
+                eprintln!(
+                    "Warning: Unknown models in configuration will be ignored: {}",
+                    unknown.join(", ")
+                );
+            }
             if !preserved.is_empty() {
                 self.visible_models = preserved;
             } else {

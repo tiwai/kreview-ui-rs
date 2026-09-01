@@ -83,7 +83,8 @@ The program loads configurations automatically. An example JSON structure:
   "theme": "ansi-light",
   "show_token_stats": true,
   "markers_dir": "/home/tiwai/.local/share/kreview-ui/markers",
-  "notes_dir": "/home/tiwai/.local/kreview-ui/notes"
+  "notes_dir": "/home/tiwai/.local/kreview-ui/notes",
+  "models": ["qwen3.6", "gpt-oss"]
 }
 ```
 

@@ -98,6 +98,14 @@ fn main() -> Result<(), Box<dyn Error>> {
     if let Some(theme) = args.theme {
         config.theme = theme;
     }
+    if let Some(models_arg) = args.models {
+        config.models = Some(
+            models_arg
+                .split(',')
+                .map(|s| s.trim().to_string())
+                .collect(),
+        );
+    }
 
     // 3. Validate database path
     if !config.database_path.exists() {
@@ -141,35 +149,6 @@ fn main() -> Result<(), Box<dyn Error>> {
             }
         };
         state.severity_filter = Some(sev);
-    }
-
-    if let Some(ref models_arg) = args.models {
-        let models_list: Vec<String> = models_arg
-            .split(',')
-            .map(|s| s.trim().to_string())
-            .collect();
-
-        let mut valid_models = Vec::new();
-        let mut unknown_models = Vec::new();
-
-        for m in models_list {
-            if state.visible_models.contains(&m) {
-                valid_models.push(m);
-            } else {
-                unknown_models.push(m);
-            }
-        }
-
-        if !unknown_models.is_empty() {
-            eprintln!(
-                "Warning: Unknown models will be ignored: {}",
-                unknown_models.join(", ")
-            );
-        }
-
-        if !valid_models.is_empty() {
-            state.visible_models = valid_models;
-        }
     }
 
     // Reapply filters to make sure active set is populated correctly

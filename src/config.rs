@@ -13,6 +13,7 @@ pub struct Config {
     pub show_token_stats: bool,
     pub markers_dir: PathBuf,
     pub notes_dir: PathBuf,
+    pub models: Option<Vec<String>>,
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize, Default)]
@@ -26,6 +27,7 @@ pub struct ConfigJson {
     pub show_token_stats: Option<bool>,
     pub markers_dir: Option<String>,
     pub notes_dir: Option<String>,
+    pub models: Option<Vec<String>>,
 }
 
 impl Default for Config {
@@ -51,6 +53,7 @@ impl Default for Config {
             show_token_stats: true,
             markers_dir,
             notes_dir,
+            models: None,
         }
     }
 }
@@ -137,6 +140,9 @@ impl Config {
         }
         if let Some(notes) = json.notes_dir {
             self.notes_dir = expand_tilde(&notes);
+        }
+        if let Some(models) = json.models {
+            self.models = Some(models);
         }
     }
 }
