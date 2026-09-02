@@ -139,16 +139,21 @@ pub struct VerifiedFinding {
     pub re_verification_status: Option<String>,
     #[serde(rename = "re-verification-comment")]
     pub re_verification_comment: Option<String>,
+    // Claude format
+    pub verdict: Option<String>,
+    pub verification_detail: Option<String>,
 }
 
 impl VerifiedFinding {
     pub fn status(&self) -> Option<&str> {
-        self.re_verification_status.as_deref()
+        self.verdict.as_deref()
+            .or(self.re_verification_status.as_deref())
             .or(self.verified_status.as_deref())
     }
 
     pub fn comment(&self) -> Option<&str> {
-        self.re_verification_comment.as_deref()
+        self.verification_detail.as_deref()
+            .or(self.re_verification_comment.as_deref())
             .or(self.verification_comments.as_deref())
     }
 }
@@ -157,6 +162,12 @@ impl VerifiedFinding {
 pub struct VerifiedResult {
     pub commit: String,
     pub model: String,
+    pub subject: Option<String>,
+    #[serde(rename = "distro-commit")]
+    pub distro_commit: Option<String>,
+    #[serde(rename = "upstream-commit")]
+    pub upstream_commit: Option<String>,
+    
     #[serde(rename = "re-verified-by")]
     pub re_verified_by: Option<String>,
     #[serde(rename = "re-verified-date")]
@@ -164,16 +175,38 @@ pub struct VerifiedResult {
     #[serde(rename = "re-verification-summary")]
     pub re_verification_summary: Option<String>,
     pub verified: Option<bool>,
+    
     #[serde(rename = "issues-found")]
     pub issues_found: Option<u32>,
-    #[serde(default)]
+    #[serde(rename = "total-findings-before-verification")]
+    pub total_findings_before_verification: Option<u32>,
+    #[serde(rename = "confirmed-findings")]
+    pub confirmed_findings: Option<u32>,
+    #[serde(rename = "pruned-findings-count")]
+    pub pruned_findings_count: Option<u32>,
+
+    #[serde(alias = "verified-findings", default)]
     pub findings: Vec<VerifiedFinding>,
+    
+    #[serde(rename = "pruned-findings", default)]
+    pub pruned_findings: Vec<VerifiedFinding>,
 }
 
 impl VerifiedResult {
     pub fn render_with_width(&self, width: usize) -> String {
         let mut out = String::new();
         out.push_str(&format!("commit {}\n", self.commit));
+        
+        if let Some(ref subject) = self.subject {
+            out.push_str(&format!("Subject: {}\n", subject));
+        }
+        if let Some(ref upstream) = self.upstream_commit {
+            out.push_str(&format!("Upstream-commit: {}\n", upstream));
+        }
+        if let Some(ref distro) = self.distro_commit {
+            out.push_str(&format!("Distro-commit: {}\n", distro));
+        }
+        
         out.push_str(&format!("Re-verification-model: {}\n", self.model));
 
         if let Some(ref by) = self.re_verified_by {
@@ -187,6 +220,15 @@ impl VerifiedResult {
         }
         if let Some(n) = self.issues_found {
             out.push_str(&format!("Issues-found: {}\n", n));
+        }
+        if let Some(n) = self.total_findings_before_verification {
+            out.push_str(&format!("Total-findings-before-verification: {}\n", n));
+        }
+        if let Some(n) = self.confirmed_findings {
+            out.push_str(&format!("Confirmed-findings: {}\n", n));
+        }
+        if let Some(n) = self.pruned_findings_count {
+            out.push_str(&format!("Pruned-findings-count: {}\n", n));
         }
 
         if let Some(ref summary) = self.re_verification_summary {
@@ -232,6 +274,38 @@ impl VerifiedResult {
                     out.push('\n');
                 }
 
+                if let Some(status) = finding.status() {
+                    out.push_str(&format!("\nVerification-status: {}\n", status));
+                }
+                if let Some(comment) = finding.comment() {
+                    out.push_str("\nVerification-comment:\n");
+                    out.push_str(&wrap_text(comment, width));
+                    out.push('\n');
+                }
+            }
+        }
+        
+        if !self.pruned_findings.is_empty() {
+            out.push_str("\n=== Pruned Findings ===\n");
+            for (i, finding) in self.pruned_findings.iter().enumerate() {
+                out.push_str(&format!("\n=== Pruned Finding {} ===\n", i + 1));
+
+                if let Some(ref cat) = finding.category {
+                    out.push_str(&format!("Category: {}\n", cat));
+                }
+                if let Some(ref f_type) = finding.finding_type {
+                    out.push_str(&format!("Type: {}\n", f_type));
+                }
+                if let Some(sev) = finding.severity {
+                    out.push_str(&format!("Severity: {}\n", sev.as_str()));
+                }
+                
+                if let Some(ref msg) = finding.message {
+                    out.push_str("\nMessage:\n");
+                    out.push_str(&wrap_text(msg, width));
+                    out.push('\n');
+                }
+                
                 if let Some(status) = finding.status() {
                     out.push_str(&format!("\nVerification-status: {}\n", status));
                 }
