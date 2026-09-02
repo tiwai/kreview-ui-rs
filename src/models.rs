@@ -140,7 +140,9 @@ pub struct VerifiedFinding {
     #[serde(rename = "re-verification-comment")]
     pub re_verification_comment: Option<String>,
     // Claude format
+    #[serde(alias = "verification")]
     pub verdict: Option<String>,
+    #[serde(alias = "verification-note")]
     pub verification_detail: Option<String>,
 }
 
@@ -162,12 +164,14 @@ impl VerifiedFinding {
 pub struct VerifiedResult {
     pub commit: String,
     pub model: String,
+    #[serde(rename = "verifier-model")]
+    pub verifier_model: Option<String>,
     pub subject: Option<String>,
     #[serde(rename = "distro-commit")]
     pub distro_commit: Option<String>,
     #[serde(rename = "upstream-commit")]
     pub upstream_commit: Option<String>,
-    
+
     #[serde(rename = "re-verified-by")]
     pub re_verified_by: Option<String>,
     #[serde(rename = "re-verified-date")]
@@ -175,19 +179,19 @@ pub struct VerifiedResult {
     #[serde(rename = "re-verification-summary")]
     pub re_verification_summary: Option<String>,
     pub verified: Option<bool>,
-    
+
     #[serde(rename = "issues-found")]
     pub issues_found: Option<u32>,
     #[serde(rename = "total-findings-before-verification")]
     pub total_findings_before_verification: Option<u32>,
-    #[serde(rename = "confirmed-findings")]
+    #[serde(rename = "confirmed-findings", alias = "issues-confirmed")]
     pub confirmed_findings: Option<u32>,
-    #[serde(rename = "pruned-findings-count")]
+    #[serde(rename = "pruned-findings-count", alias = "issues-pruned")]
     pub pruned_findings_count: Option<u32>,
 
     #[serde(alias = "verified-findings", default)]
     pub findings: Vec<VerifiedFinding>,
-    
+
     #[serde(rename = "pruned-findings", default)]
     pub pruned_findings: Vec<VerifiedFinding>,
 }
@@ -207,7 +211,12 @@ impl VerifiedResult {
             out.push_str(&format!("Distro-commit: {}\n", distro));
         }
         
-        out.push_str(&format!("Re-verification-model: {}\n", self.model));
+        if let Some(ref verifier) = self.verifier_model {
+            out.push_str(&format!("Model: {}\n", self.model));
+            out.push_str(&format!("Verifier-model: {}\n", verifier));
+        } else {
+            out.push_str(&format!("Re-verification-model: {}\n", self.model));
+        }
 
         if let Some(ref by) = self.re_verified_by {
             out.push_str(&format!("Re-verified-by: {}\n", by));
