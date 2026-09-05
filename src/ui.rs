@@ -12,7 +12,9 @@ use std::io;
 use std::time::Instant;
 
 use crate::git_ops::GitViewer;
-use crate::models::{strip_patch_prefix, CommitReview, ReviewMetadata, Severity, Status, VerifiedResult};
+use crate::models::{
+    strip_patch_prefix, CommitReview, ReviewMetadata, Severity, Status, VerifiedResult,
+};
 use crate::state::AppState;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -554,12 +556,10 @@ impl TuiApp {
             if key.modifiers.contains(KeyModifiers::CONTROL) && key.code == KeyCode::Char('s') {
                 match Self::save_content_to_file(&s) {
                     Ok(path) => {
-                        self.status_message =
-                            Some((format!("Saved to: {}", path), Instant::now()));
+                        self.status_message = Some((format!("Saved to: {}", path), Instant::now()));
                     }
                     Err(e) => {
-                        self.status_message =
-                            Some((format!("Save failed: {}", e), Instant::now()));
+                        self.status_message = Some((format!("Save failed: {}", e), Instant::now()));
                     }
                 }
                 self.active_screen = ActiveScreen::ContentViewer(s);
@@ -1364,12 +1364,22 @@ impl TuiApp {
     }
 
     fn action_show_verified_result(&mut self, commit: &CommitReview, model_id: &str) {
-        let Some(review) = commit.reviews.get(model_id) else { return };
+        let Some(review) = commit.reviews.get(model_id) else {
+            return;
+        };
         if !review.has_verified_result {
             return;
         }
-        let Some(json_str) = self.state.db.get_review_content(model_id, &commit.sha, "verified-result.json") else { return };
-        let Ok(verified) = serde_json::from_str::<VerifiedResult>(&json_str) else { return };
+        let Some(json_str) =
+            self.state
+                .db
+                .get_review_content(model_id, &commit.sha, "verified-result.json")
+        else {
+            return;
+        };
+        let Ok(verified) = serde_json::from_str::<VerifiedResult>(&json_str) else {
+            return;
+        };
 
         let width = if let Ok((cols, _)) = crossterm::terminal::size() {
             (cols.saturating_sub(2) as usize).max(40)
@@ -1659,7 +1669,10 @@ impl TuiApp {
         }
 
         // Expire status message after 3 seconds
-        let elapsed = self.status_message.as_ref().map(|(_, t)| t.elapsed().as_secs());
+        let elapsed = self
+            .status_message
+            .as_ref()
+            .map(|(_, t)| t.elapsed().as_secs());
         if elapsed.map(|e| e >= 3).unwrap_or(false) {
             self.status_message = None;
         }
@@ -1853,7 +1866,12 @@ impl TuiApp {
 
         // Verified result marker
         if review.has_verified_result {
-            spans.push(Span::styled("V", base_style.fg(theme.verified_result_fg).add_modifier(Modifier::BOLD)));
+            spans.push(Span::styled(
+                "V",
+                base_style
+                    .fg(theme.verified_result_fg)
+                    .add_modifier(Modifier::BOLD),
+            ));
         }
 
         // Downstream only findings [N]

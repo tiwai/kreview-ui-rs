@@ -128,33 +128,46 @@ pub struct VerifiedFinding {
     pub finding_type: Option<String>,
     pub severity: Option<Severity>,
     pub confidence: Option<serde_json::Value>,
+    #[serde(alias = "reported-message")]
     pub message: Option<String>,
     pub evidence: Option<String>,
+    #[serde(rename = "upstream-status")]
     pub upstream_status: Option<String>,
+
     // Older format
     pub verified_status: Option<String>,
     pub verification_comments: Option<String>,
+
     // Newer format
     #[serde(rename = "re-verification-status")]
     pub re_verification_status: Option<String>,
     #[serde(rename = "re-verification-comment")]
     pub re_verification_comment: Option<String>,
+
     // Claude format
     #[serde(alias = "verification")]
     pub verdict: Option<String>,
     #[serde(alias = "verification-note")]
     pub verification_detail: Option<String>,
+
+    // Gemini new format
+    pub status: Option<String>,
+    pub reason: Option<String>,
 }
 
 impl VerifiedFinding {
     pub fn status(&self) -> Option<&str> {
-        self.verdict.as_deref()
+        self.status
+            .as_deref()
+            .or(self.verdict.as_deref())
             .or(self.re_verification_status.as_deref())
             .or(self.verified_status.as_deref())
     }
 
     pub fn comment(&self) -> Option<&str> {
-        self.verification_detail.as_deref()
+        self.reason
+            .as_deref()
+            .or(self.verification_detail.as_deref())
             .or(self.re_verification_comment.as_deref())
             .or(self.verification_comments.as_deref())
     }
@@ -176,31 +189,67 @@ pub struct VerifiedResult {
     pub re_verified_by: Option<String>,
     #[serde(rename = "re-verified-date")]
     pub re_verified_date: Option<String>,
+    #[serde(rename = "re-verification-date")]
+    pub re_verification_date: Option<String>,
+
     #[serde(rename = "re-verification-summary")]
     pub re_verification_summary: Option<String>,
+    pub summary: Option<String>,
+
+    pub verdict: Option<String>,
     pub verified: Option<bool>,
 
     #[serde(rename = "issues-found")]
     pub issues_found: Option<u32>,
     #[serde(rename = "total-findings-before-verification")]
     pub total_findings_before_verification: Option<u32>,
-    #[serde(rename = "confirmed-findings", alias = "issues-confirmed")]
-    pub confirmed_findings: Option<u32>,
+    #[serde(rename = "confirmed-findings")]
+    pub confirmed_findings_raw: Option<serde_json::Value>,
+    #[serde(rename = "issues-confirmed")]
+    pub issues_confirmed: Option<u32>,
     #[serde(rename = "pruned-findings-count", alias = "issues-pruned")]
     pub pruned_findings_count: Option<u32>,
 
     #[serde(alias = "verified-findings", default)]
     pub findings: Vec<VerifiedFinding>,
+    #[serde(rename = "findings-evaluation", default)]
+    pub findings_evaluation: Vec<VerifiedFinding>,
 
     #[serde(rename = "pruned-findings", default)]
     pub pruned_findings: Vec<VerifiedFinding>,
 }
 
 impl VerifiedResult {
+    pub fn confirmed_findings(&self) -> Option<u32> {
+        self.issues_confirmed.or_else(|| {
+            self.confirmed_findings_raw.as_ref().and_then(|v| match v {
+                serde_json::Value::Number(n) => n.as_u64().map(|x| x as u32),
+                serde_json::Value::Array(arr) => Some(arr.len() as u32),
+                _ => None,
+            })
+        })
+    }
+
+    pub fn findings(&self) -> Vec<VerifiedFinding> {
+        if !self.findings.is_empty() {
+            self.findings.clone()
+        } else if !self.findings_evaluation.is_empty() {
+            self.findings_evaluation.clone()
+        } else if let Some(ref v) = self.confirmed_findings_raw {
+            if let Ok(list) = serde_json::from_value::<Vec<VerifiedFinding>>(v.clone()) {
+                list
+            } else {
+                Vec::new()
+            }
+        } else {
+            Vec::new()
+        }
+    }
+
     pub fn render_with_width(&self, width: usize) -> String {
         let mut out = String::new();
         out.push_str(&format!("commit {}\n", self.commit));
-        
+
         if let Some(ref subject) = self.subject {
             out.push_str(&format!("Subject: {}\n", subject));
         }
@@ -210,7 +259,7 @@ impl VerifiedResult {
         if let Some(ref distro) = self.distro_commit {
             out.push_str(&format!("Distro-commit: {}\n", distro));
         }
-        
+
         if let Some(ref verifier) = self.verifier_model {
             out.push_str(&format!("Model: {}\n", self.model));
             out.push_str(&format!("Verifier-model: {}\n", verifier));
@@ -221,8 +270,15 @@ impl VerifiedResult {
         if let Some(ref by) = self.re_verified_by {
             out.push_str(&format!("Re-verified-by: {}\n", by));
         }
-        if let Some(ref date) = self.re_verified_date {
+        let date_text = self
+            .re_verified_date
+            .as_deref()
+            .or(self.re_verification_date.as_deref());
+        if let Some(date) = date_text {
             out.push_str(&format!("Re-verified-date: {}\n", date));
+        }
+        if let Some(ref verdict) = self.verdict {
+            out.push_str(&format!("Verdict: {}\n", verdict));
         }
         if let Some(v) = self.verified {
             out.push_str(&format!("Verified: {}\n", v));
@@ -233,22 +289,27 @@ impl VerifiedResult {
         if let Some(n) = self.total_findings_before_verification {
             out.push_str(&format!("Total-findings-before-verification: {}\n", n));
         }
-        if let Some(n) = self.confirmed_findings {
+        if let Some(n) = self.confirmed_findings() {
             out.push_str(&format!("Confirmed-findings: {}\n", n));
         }
         if let Some(n) = self.pruned_findings_count {
             out.push_str(&format!("Pruned-findings-count: {}\n", n));
         }
 
-        if let Some(ref summary) = self.re_verification_summary {
+        let summary_text = self
+            .re_verification_summary
+            .as_deref()
+            .or(self.summary.as_deref());
+        if let Some(summary) = summary_text {
             out.push_str("\n=== Re-verification Summary ===\n");
             out.push_str(&wrap_text(summary, width));
             out.push('\n');
         }
 
-        if !self.findings.is_empty() {
+        let findings = self.findings();
+        if !findings.is_empty() {
             out.push_str("\n=== Findings ===\n");
-            for (i, finding) in self.findings.iter().enumerate() {
+            for (i, finding) in findings.iter().enumerate() {
                 out.push_str(&format!("\n=== Finding {} ===\n", i + 1));
 
                 if let Some(ref cat) = finding.category {
@@ -293,7 +354,7 @@ impl VerifiedResult {
                 }
             }
         }
-        
+
         if !self.pruned_findings.is_empty() {
             out.push_str("\n=== Pruned Findings ===\n");
             for (i, finding) in self.pruned_findings.iter().enumerate() {
@@ -308,13 +369,13 @@ impl VerifiedResult {
                 if let Some(sev) = finding.severity {
                     out.push_str(&format!("Severity: {}\n", sev.as_str()));
                 }
-                
+
                 if let Some(ref msg) = finding.message {
                     out.push_str("\nMessage:\n");
                     out.push_str(&wrap_text(msg, width));
                     out.push('\n');
                 }
-                
+
                 if let Some(status) = finding.status() {
                     out.push_str(&format!("\nVerification-status: {}\n", status));
                 }
@@ -771,11 +832,7 @@ mod tests {
         }
         let mut checked = 0;
         let mut errors = Vec::new();
-        fn visit_dirs(
-            dir: &std::path::Path,
-            checked: &mut usize,
-            errors: &mut Vec<String>,
-        ) {
+        fn visit_dirs(dir: &std::path::Path, checked: &mut usize, errors: &mut Vec<String>) {
             if dir.is_dir() {
                 for entry in std::fs::read_dir(dir).unwrap() {
                     let entry = entry.unwrap();
@@ -797,7 +854,12 @@ mod tests {
         }
         visit_dirs(db_path, &mut checked, &mut errors);
         if !errors.is_empty() {
-            panic!("Checked {} files, failed {} files:\n{}", checked, errors.len(), errors.join("\n"));
+            panic!(
+                "Checked {} files, failed {} files:\n{}",
+                checked,
+                errors.len(),
+                errors.join("\n")
+            );
         }
     }
 }
