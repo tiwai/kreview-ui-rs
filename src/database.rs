@@ -194,7 +194,8 @@ impl ReviewDatabase {
         CommitReview {
             sha: sha.to_string(),
             subject,
-            author,
+            author: author.clone(),
+            committer: author,
             suse_commit,
             upstream_commit,
             reviews,

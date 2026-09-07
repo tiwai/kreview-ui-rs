@@ -101,6 +101,8 @@ pub struct Finding {
 pub struct InlineReview {
     pub commit: String,
     pub author: String,
+    #[serde(default)]
+    pub committer: Option<String>,
     pub subject: String,
     #[serde(rename = "suse-commit", alias = "distro-commit")]
     pub suse_commit: Option<String>,
@@ -503,7 +505,11 @@ impl InlineReview {
     pub fn render_with_width(&self, diff_content: Option<&str>, width: usize) -> String {
         let mut out = String::new();
         out.push_str(&format!("commit {}\n", self.commit));
-        out.push_str(&format!("Author: {}\n\n", self.author));
+        out.push_str(&format!("Author: {}\n", self.author));
+        if let Some(ref committer) = self.committer {
+            out.push_str(&format!("Committer: {}\n", committer));
+        }
+        out.push_str("\n");
         out.push_str(&format!("{}\n\n", self.subject));
 
         if let Some(ref suse) = self.suse_commit {
@@ -594,6 +600,7 @@ pub struct CommitReview {
     pub sha: String,
     pub subject: String,
     pub author: String,
+    pub committer: String,
     pub suse_commit: Option<String>,
     pub upstream_commit: Option<String>,
     pub reviews: HashMap<String, ReviewMetadata>,

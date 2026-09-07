@@ -29,6 +29,7 @@ impl GitViewer {
             .arg("-C")
             .arg(repo)
             .arg("show")
+            .arg("--format=fuller")
             .arg(sha)
             .output();
 

@@ -1,10 +1,42 @@
 use std::collections::{HashMap, HashSet};
 use std::fs;
 use std::path::Path;
+use std::process::Command;
 
 use crate::config::Config;
 use crate::database::ReviewDatabase;
 use crate::models::{Branch, CommitReview, Severity, Status};
+
+fn fetch_commit_metadata(repo_path: &Path, shas: &[String]) -> HashMap<String, (String, String)> {
+    let mut result = HashMap::new();
+    if shas.is_empty() || !repo_path.exists() {
+        return result;
+    }
+
+    for chunk in shas.chunks(500) {
+        let mut cmd = Command::new("git");
+        cmd.arg("-C")
+            .arg(repo_path)
+            .arg("log")
+            .arg("--no-walk")
+            .arg("--ignore-missing")
+            .arg("--format=%H%n%an <%ae>%n%cn <%ce>");
+        for sha in chunk {
+            cmd.arg(sha);
+        }
+
+        if let Ok(output) = cmd.output() {
+            if output.status.success() {
+                let stdout = String::from_utf8_lossy(&output.stdout);
+                let mut lines = stdout.lines();
+                while let (Some(sha), Some(author), Some(committer)) = (lines.next(), lines.next(), lines.next()) {
+                    result.insert(sha.trim().to_string(), (author.trim().to_string(), committer.trim().to_string()));
+                }
+            }
+        }
+    }
+    result
+}
 
 pub struct AppState {
     pub config: Config,
@@ -97,10 +129,31 @@ impl AppState {
 
         // Load commits (lazy - skip commits that don't have any reviews)
         let mut loaded_commits = Vec::new();
+        let mut shas_to_query = Vec::new();
         for sha in &branch.commits {
             let commit_review = self.db.load_commit_reviews(sha, &branch.models);
             if !commit_review.reviews.is_empty() {
                 loaded_commits.push(commit_review);
+                shas_to_query.push(sha.clone());
+            }
+        }
+
+        // Batch fetch git metadata (author and committer) from downstream repo if configured
+        if let Some(ref repo_path) = self.config.downstream_repo {
+            let metadata_map = fetch_commit_metadata(repo_path, &shas_to_query);
+            for commit in &mut loaded_commits {
+                if let Some((author, committer)) = metadata_map.get(&commit.sha) {
+                    commit.author = author.clone();
+                    commit.committer = committer.clone();
+                } else {
+                    // Fallback if not found in git
+                    commit.committer = commit.author.clone();
+                }
+            }
+        } else {
+            // Fallback if repo not configured
+            for commit in &mut loaded_commits {
+                commit.committer = commit.author.clone();
             }
         }
 
@@ -120,10 +173,10 @@ impl AppState {
     pub fn apply_filters(&mut self) {
         let mut filtered = self.commits.clone();
 
-        // 1. Author Filter
-        if let Some(ref author) = self.author_filter {
-            let author_lower = author.to_lowercase();
-            filtered.retain(|c| c.author.to_lowercase().contains(&author_lower));
+        // 1. Committer Filter (replaces Author Filter as requested)
+        if let Some(ref committer) = self.author_filter {
+            let committer_lower = committer.to_lowercase();
+            filtered.retain(|c| c.committer.to_lowercase().contains(&committer_lower));
         }
 
         // 2. Severity Filter (requires any visible model finding >= filter)
@@ -157,14 +210,14 @@ impl AppState {
         self.filtered_commits = filtered;
     }
 
-    pub fn get_unique_authors(&self) -> Vec<String> {
-        let mut authors = HashSet::new();
+    pub fn get_unique_committers(&self) -> Vec<String> {
+        let mut committers = HashSet::new();
         for commit in &self.commits {
-            if !commit.author.is_empty() {
-                authors.insert(commit.author.clone());
+            if !commit.committer.is_empty() {
+                committers.insert(commit.committer.clone());
             }
         }
-        let mut sorted: Vec<String> = authors.into_iter().collect();
+        let mut sorted: Vec<String> = committers.into_iter().collect();
         sorted.sort();
         sorted
     }
@@ -377,6 +430,7 @@ mod tests {
             sha: "test_sha".to_string(),
             subject: "test subject".to_string(),
             author: "test author".to_string(),
+            committer: "test author".to_string(),
             suse_commit: None,
             upstream_commit: None,
             status: Status::Unread,
@@ -433,5 +487,65 @@ mod tests {
 
         // Clean up
         let _ = std::fs::remove_dir_all(&notes_dir);
+    }
+
+    #[test]
+    fn test_committer_filtering_and_uniqueness() {
+        let mut config = Config::default();
+        config.database_path = std::path::PathBuf::from("nonexistent_db_path");
+        let mut state = AppState::new(config);
+
+        let commits = vec![
+            CommitReview {
+                sha: "sha1".to_string(),
+                subject: "Subject 1".to_string(),
+                author: "cve-kpm".to_string(),
+                committer: "Takashi Iwai <tiwai@suse.de>".to_string(),
+                suse_commit: None,
+                upstream_commit: None,
+                reviews: HashMap::new(),
+                status: Status::Unread,
+            },
+            CommitReview {
+                sha: "sha2".to_string(),
+                subject: "Subject 2".to_string(),
+                author: "cve-kpm".to_string(),
+                committer: "Daniel Wagner <dwagner@suse.de>".to_string(),
+                suse_commit: None,
+                upstream_commit: None,
+                reviews: HashMap::new(),
+                status: Status::Unread,
+            },
+            CommitReview {
+                sha: "sha3".to_string(),
+                subject: "Subject 3".to_string(),
+                author: "Other Author".to_string(),
+                committer: "Takashi Iwai <tiwai@suse.de>".to_string(),
+                suse_commit: None,
+                upstream_commit: None,
+                reviews: HashMap::new(),
+                status: Status::Unread,
+            },
+        ];
+
+        state.commits = commits;
+
+        // 1. Verify get_unique_committers()
+        let unique = state.get_unique_committers();
+        assert_eq!(unique.len(), 2);
+        assert_eq!(unique[0], "Daniel Wagner <dwagner@suse.de>");
+        assert_eq!(unique[1], "Takashi Iwai <tiwai@suse.de>");
+
+        // 2. Verify filtering by committer
+        state.author_filter = Some("Takashi".to_string());
+        state.apply_filters();
+        assert_eq!(state.filtered_commits.len(), 2);
+        assert_eq!(state.filtered_commits[0].sha, "sha1");
+        assert_eq!(state.filtered_commits[1].sha, "sha3");
+
+        // Filter that matches none
+        state.author_filter = Some("Nonexistent".to_string());
+        state.apply_filters();
+        assert!(state.filtered_commits.is_empty());
     }
 }

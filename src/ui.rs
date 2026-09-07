@@ -190,8 +190,8 @@ impl ContentViewerState {
     }
 }
 
-pub struct AuthorFilterState {
-    pub authors: Vec<String>,
+pub struct CommitterFilterState {
+    pub committers: Vec<String>,
     pub selected_index: usize,
     pub scroll_offset: usize,
 }
@@ -233,7 +233,7 @@ pub enum ActiveScreen {
 
 pub enum ActiveDialog {
     None,
-    AuthorFilter(AuthorFilterState),
+    CommitterFilter(CommitterFilterState),
     SeverityFilter(SeverityFilterState),
     SubjectSearch(SubjectSearchState),
     ModelToggle(ModelToggleState),
@@ -311,7 +311,7 @@ impl TuiApp {
     fn handle_key(&mut self, key: event::KeyEvent) -> bool {
         // If a dialog is active, it intercepts keys
         match &mut self.active_dialog {
-            ActiveDialog::AuthorFilter(s) => {
+            ActiveDialog::CommitterFilter(s) => {
                 match key.code {
                     KeyCode::Esc => self.active_dialog = ActiveDialog::None,
                     KeyCode::Up => {
@@ -323,7 +323,7 @@ impl TuiApp {
                         }
                     }
                     KeyCode::Down => {
-                        if s.selected_index < s.authors.len() {
+                        if s.selected_index < s.committers.len() {
                             s.selected_index += 1;
                             if s.selected_index >= s.scroll_offset + 15 {
                                 s.scroll_offset = s.selected_index - 14;
@@ -335,7 +335,7 @@ impl TuiApp {
                             self.state.author_filter = None;
                         } else {
                             self.state.author_filter =
-                                Some(s.authors[s.selected_index - 1].clone());
+                                Some(s.committers[s.selected_index - 1].clone());
                         }
                         self.state.apply_filters();
                         self.selected_row = 0;
@@ -770,9 +770,9 @@ impl TuiApp {
                 if key.modifiers.contains(KeyModifiers::CONTROL) {
                     match key.code {
                         KeyCode::Char('a') => {
-                            let authors = self.state.get_unique_authors();
-                            self.active_dialog = ActiveDialog::AuthorFilter(AuthorFilterState {
-                                authors,
+                            let committers = self.state.get_unique_committers();
+                            self.active_dialog = ActiveDialog::CommitterFilter(CommitterFilterState {
+                                committers,
                                 selected_index: 0,
                                 scroll_offset: 0,
                             });
@@ -1022,6 +1022,8 @@ impl TuiApp {
         };
         let subject = strip_patch_prefix(&commit.subject);
         content_parts.push(format!("{} {}\n", status_emoji, subject));
+        content_parts.push(format!("Author: {}\n", commit.author));
+        content_parts.push(format!("Committer: {}\n", commit.committer));
 
         if let Some(note_text) = self.state.get_commit_note(&commit.sha) {
             content_parts.push(format!("\n=== Note ===\n{}\n", note_text));
@@ -1415,17 +1417,18 @@ impl TuiApp {
     fn get_rendered_review_details(
         &self,
         model_id: &str,
-        sha: &str,
+        commit: &CommitReview,
     ) -> Option<(String, Option<String>, Option<String>, Option<usize>)> {
         if let Some(json_str) =
             self.state
                 .db
-                .get_review_content(model_id, sha, "review-inline.json")
+                .get_review_content(model_id, &commit.sha, "review-inline.json")
         {
-            if let Ok(inline_review) =
+            if let Ok(mut inline_review) =
                 serde_json::from_str::<crate::models::InlineReview>(&json_str)
             {
-                let diff_content = self.git_viewer.show_downstream_diff(sha).ok();
+                inline_review.committer = Some(commit.committer.clone());
+                let diff_content = self.git_viewer.show_downstream_diff(&commit.sha).ok();
                 let width = if let Ok((cols, _)) = crossterm::terminal::size() {
                     (cols.saturating_sub(2) as usize).max(40)
                 } else {
@@ -1439,7 +1442,7 @@ impl TuiApp {
         if let Some(content) = self
             .state
             .db
-            .get_review_content(model_id, sha, "review-inline.txt")
+            .get_review_content(model_id, &commit.sha, "review-inline.txt")
         {
             return Some((content, None, None, None));
         }
@@ -1453,7 +1456,7 @@ impl TuiApp {
             let model_id = &self.state.visible_models[index];
             if let Some(review) = commit.reviews.get(model_id) {
                 if let Some((mut content, source_json, diff_content, rendered_width)) =
-                    self.get_rendered_review_details(model_id, &commit.sha)
+                    self.get_rendered_review_details(model_id, commit)
                 {
                     if review.has_fix_patches {
                         content = format!(
@@ -1509,7 +1512,7 @@ impl TuiApp {
             let model_id = &self.state.visible_models[index];
             if let Some(review) = commit.reviews.get(model_id) {
                 if let Some((mut content, source_json, diff_content, rendered_width)) =
-                    self.get_rendered_review_details(model_id, &commit.sha)
+                    self.get_rendered_review_details(model_id, &commit)
                 {
                     if review.has_fix_patches {
                         content = format!(
@@ -1614,7 +1617,7 @@ impl TuiApp {
         // Filters Subtitle
         let mut info_parts = vec![format!("{} commits", self.state.filtered_commits.len())];
         if let Some(ref auth) = self.state.author_filter {
-            info_parts.push(format!("Author: {}", auth));
+            info_parts.push(format!("Committer: {}", auth));
         }
         if let Some(ref sev) = self.state.severity_filter {
             info_parts.push(format!("Severity: {}+", sev.as_str().to_uppercase()));
@@ -1680,7 +1683,7 @@ impl TuiApp {
         // Footer
         let default_footer: &str = match self.active_screen {
             ActiveScreen::MainTable => {
-                "h/?: Help | Enter: Cell Action | x: Toggle status | c: Downstream | s: SUSE | u: Upstream | d: Diff | 1-3: Review | Ctrl+A: Author | Ctrl+L: Severity | Ctrl+F: Search | Ctrl+B: Branch | m: Models | q: Quit"
+                "h/?: Help | Enter: Cell Action | x: Toggle status | c: Downstream | s: SUSE | u: Upstream | d: Diff | 1-3: Review | Ctrl+A: Committer | Ctrl+L: Severity | Ctrl+F: Search | Ctrl+B: Branch | m: Models | q: Quit"
             }
             ActiveScreen::ContentViewer(_) => {
                 "h/?: Help | Esc/q: Back | Ctrl+S: Save | c: Downstream | s: SUSE | u: Upstream | d: Diff | p: Patches | v: Verified | 1-3: Review | Up/Down/Left/Right: Scroll"
@@ -2224,7 +2227,7 @@ impl TuiApp {
         let theme = ThemeStyles::new(theme_type);
 
         match &self.active_dialog {
-            ActiveDialog::AuthorFilter(s) => {
+            ActiveDialog::CommitterFilter(s) => {
                 let size = f.size();
                 let width = 60;
                 let height = 18;
@@ -2233,18 +2236,18 @@ impl TuiApp {
                 f.render_widget(Clear, area);
 
                 let mut list_lines = Vec::new();
-                // "All Authors" as the 0-th option
+                // "All Committers" as the 0-th option
                 let all_selected = s.selected_index == 0;
                 let all_style = if all_selected {
                     Style::default().fg(theme.selected_fg).bg(theme.selected_bg)
                 } else {
                     Style::default()
                 };
-                list_lines.push(Line::from(Span::styled(" [All Authors] ", all_style)));
+                list_lines.push(Line::from(Span::styled(" [All Committers] ", all_style)));
 
-                // Display authors matching scroll window
-                let render_authors = s.authors.iter().skip(s.scroll_offset).take(15);
-                for (idx, author) in render_authors.enumerate() {
+                // Display committers matching scroll window
+                let render_committers = s.committers.iter().skip(s.scroll_offset).take(15);
+                for (idx, committer) in render_committers.enumerate() {
                     let actual_idx = s.scroll_offset + idx + 1;
                     let selected = s.selected_index == actual_idx;
                     let style = if selected {
@@ -2252,10 +2255,10 @@ impl TuiApp {
                     } else {
                         Style::default()
                     };
-                    list_lines.push(Line::from(Span::styled(format!(" {} ", author), style)));
+                    list_lines.push(Line::from(Span::styled(format!(" {} ", committer), style)));
                 }
 
-                let current_filter = self.state.author_filter.as_deref().unwrap_or("All Authors");
+                let current_filter = self.state.author_filter.as_deref().unwrap_or("All Committers");
                 let p = Paragraph::new(list_lines)
                     .style(
                         Style::default()
@@ -2265,7 +2268,7 @@ impl TuiApp {
                     .block(
                         Block::default()
                             .borders(Borders::ALL)
-                            .title(format!(" Filter by Author (Current: {}) ", current_filter)),
+                            .title(format!(" Filter by Committer (Current: {}) ", current_filter)),
                     );
                 f.render_widget(p, area);
             }
@@ -2448,7 +2451,7 @@ impl TuiApp {
                 add_item(Some("Esc / q"), "Go back to Main Table (Viewer)");
 
                 add_item(None, "Filtering & Configuration");
-                add_item(Some("Ctrl+A / L"), "Filter by Author / Severity level");
+                add_item(Some("Ctrl+A / L"), "Filter by Committer / Severity level");
                 add_item(Some("Ctrl+F / B"), "Search commit subject / Switch branch");
                 add_item(Some("m"), "Toggle visible model columns");
 
@@ -2748,6 +2751,7 @@ mod tests {
                 sha: "1111111111111111111111111111111111111111".to_string(),
                 subject: "Commit 1".to_string(),
                 author: "Author A".to_string(),
+                committer: "Author A".to_string(),
                 suse_commit: None,
                 upstream_commit: None,
                 reviews: std::collections::HashMap::new(),
@@ -2757,6 +2761,7 @@ mod tests {
                 sha: "2222222222222222222222222222222222222222".to_string(),
                 subject: "Commit 2".to_string(),
                 author: "Author B".to_string(),
+                committer: "Author B".to_string(),
                 suse_commit: None,
                 upstream_commit: None,
                 reviews: std::collections::HashMap::new(),
@@ -2766,6 +2771,7 @@ mod tests {
                 sha: "3333333333333333333333333333333333333333".to_string(),
                 subject: "Commit 3".to_string(),
                 author: "Author A".to_string(),
+                committer: "Author A".to_string(),
                 suse_commit: None,
                 upstream_commit: None,
                 reviews: std::collections::HashMap::new(),
@@ -2789,6 +2795,7 @@ mod tests {
             sha: "1111111111111111111111111111111111111111".to_string(),
             subject: "Commit 1".to_string(),
             author: "Author A".to_string(),
+            committer: "Author A".to_string(),
             suse_commit: None,
             upstream_commit: None,
             reviews: std::collections::HashMap::new(),
@@ -2839,6 +2846,7 @@ mod tests {
             sha: "1111111111111111111111111111111111111111".to_string(),
             subject: "Commit 1".to_string(),
             author: "Author A".to_string(),
+            committer: "Author A".to_string(),
             suse_commit: None,
             upstream_commit: None,
             reviews,
@@ -2881,6 +2889,7 @@ mod tests {
             sha: "test_sha_notes_ui_1234567890".to_string(),
             subject: "Test Commit".to_string(),
             author: "Author A".to_string(),
+            committer: "Author A".to_string(),
             suse_commit: None,
             upstream_commit: None,
             reviews: HashMap::new(),
@@ -3178,6 +3187,7 @@ mod tests {
             sha: "2222222222222222222222222222222222222222".to_string(),
             subject: "[PATCH 1/1] Fix memory leak".to_string(),
             author: "Author A".to_string(),
+            committer: "Author A".to_string(),
             suse_commit: None,
             upstream_commit: None,
             reviews: std::collections::HashMap::new(),
