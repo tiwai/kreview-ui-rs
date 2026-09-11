@@ -155,6 +155,8 @@ pub struct VerifiedFinding {
     // Gemini new format
     pub status: Option<String>,
     pub reason: Option<String>,
+    pub reasoning: Option<String>,
+    pub verification_explanation: Option<String>,
 }
 
 impl VerifiedFinding {
@@ -169,6 +171,8 @@ impl VerifiedFinding {
     pub fn comment(&self) -> Option<&str> {
         self.reason
             .as_deref()
+            .or(self.reasoning.as_deref())
+            .or(self.verification_explanation.as_deref())
             .or(self.verification_detail.as_deref())
             .or(self.re_verification_comment.as_deref())
             .or(self.verification_comments.as_deref())
@@ -177,7 +181,9 @@ impl VerifiedFinding {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct VerifiedResult {
+    #[serde(default)]
     pub commit: String,
+    #[serde(default)]
     pub model: String,
     #[serde(rename = "verifier-model")]
     pub verifier_model: Option<String>,
@@ -250,7 +256,9 @@ impl VerifiedResult {
 
     pub fn render_with_width(&self, width: usize) -> String {
         let mut out = String::new();
-        out.push_str(&format!("commit {}\n", self.commit));
+        if !self.commit.is_empty() {
+            out.push_str(&format!("commit {}\n", self.commit));
+        }
 
         if let Some(ref subject) = self.subject {
             out.push_str(&format!("Subject: {}\n", subject));
@@ -263,9 +271,11 @@ impl VerifiedResult {
         }
 
         if let Some(ref verifier) = self.verifier_model {
-            out.push_str(&format!("Model: {}\n", self.model));
+            if !self.model.is_empty() {
+                out.push_str(&format!("Model: {}\n", self.model));
+            }
             out.push_str(&format!("Verifier-model: {}\n", verifier));
-        } else {
+        } else if !self.model.is_empty() {
             out.push_str(&format!("Re-verification-model: {}\n", self.model));
         }
 
@@ -832,6 +842,32 @@ mod tests {
     }
 
     #[test]
+    fn test_verified_result_reasoning() {
+        let json_data = r#"{
+          "commit": "079d64ed62576dea693d0a0c40dcf163c35c6f18",
+          "model": "mglimmer",
+          "verdict": "unsafe",
+          "summary": "Re-verification summary here",
+          "findings-evaluation": [
+            {
+              "category": "CHANGE-1",
+              "type": "resource-leak",
+              "status": "confirmed",
+              "reasoning": "This is the reasoning for the leak."
+            }
+          ]
+        }"#;
+
+        let verified: VerifiedResult = serde_json::from_str(json_data).unwrap();
+        let findings = verified.findings();
+        assert_eq!(findings.len(), 1);
+        assert_eq!(findings[0].comment(), Some("This is the reasoning for the leak."));
+
+        let rendered = verified.render_with_width(80);
+        assert!(rendered.contains("Verification-comment:\nThis is the reasoning for the leak."));
+    }
+
+    #[test]
     fn test_diagnose_db_json() {
         let db_path = std::path::Path::new("/home/tiwai/tmp/kreviews/db");
         if !db_path.exists() {
@@ -863,6 +899,45 @@ mod tests {
         if !errors.is_empty() {
             panic!(
                 "Checked {} files, failed {} files:\n{}",
+                checked,
+                errors.len(),
+                errors.join("\n")
+            );
+        }
+    }
+
+    #[test]
+    fn test_diagnose_db_verified_json() {
+        let db_path = std::path::Path::new("/home/tiwai/tmp/kreviews/db");
+        if !db_path.exists() {
+            return;
+        }
+        let mut checked = 0;
+        let mut errors = Vec::new();
+        fn visit_dirs(dir: &std::path::Path, checked: &mut usize, errors: &mut Vec<String>) {
+            if dir.is_dir() {
+                for entry in std::fs::read_dir(dir).unwrap() {
+                    let entry = entry.unwrap();
+                    let path = entry.path();
+                    if path.is_dir() {
+                        visit_dirs(&path, checked, errors);
+                    } else if path.is_file() && path.file_name().unwrap() == "verified-result.json" {
+                        *checked += 1;
+                        let content = std::fs::read_to_string(&path).unwrap();
+                        match serde_json::from_str::<VerifiedResult>(&content) {
+                            Ok(_) => {}
+                            Err(e) => {
+                                errors.push(format!("{}: {}", path.display(), e));
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        visit_dirs(db_path, &mut checked, &mut errors);
+        if !errors.is_empty() {
+            panic!(
+                "Checked {} verified-result.json files, failed {} files:\n{}",
                 checked,
                 errors.len(),
                 errors.join("\n")
