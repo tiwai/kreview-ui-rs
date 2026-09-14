@@ -861,7 +861,10 @@ mod tests {
         let verified: VerifiedResult = serde_json::from_str(json_data).unwrap();
         let findings = verified.findings();
         assert_eq!(findings.len(), 1);
-        assert_eq!(findings[0].comment(), Some("This is the reasoning for the leak."));
+        assert_eq!(
+            findings[0].comment(),
+            Some("This is the reasoning for the leak.")
+        );
 
         let rendered = verified.render_with_width(80);
         assert!(rendered.contains("Verification-comment:\nThis is the reasoning for the leak."));
@@ -921,7 +924,8 @@ mod tests {
                     let path = entry.path();
                     if path.is_dir() {
                         visit_dirs(&path, checked, errors);
-                    } else if path.is_file() && path.file_name().unwrap() == "verified-result.json" {
+                    } else if path.is_file() && path.file_name().unwrap() == "verified-result.json"
+                    {
                         *checked += 1;
                         let content = std::fs::read_to_string(&path).unwrap();
                         match serde_json::from_str::<VerifiedResult>(&content) {

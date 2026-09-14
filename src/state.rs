@@ -29,8 +29,13 @@ fn fetch_commit_metadata(repo_path: &Path, shas: &[String]) -> HashMap<String, (
             if output.status.success() {
                 let stdout = String::from_utf8_lossy(&output.stdout);
                 let mut lines = stdout.lines();
-                while let (Some(sha), Some(author), Some(committer)) = (lines.next(), lines.next(), lines.next()) {
-                    result.insert(sha.trim().to_string(), (author.trim().to_string(), committer.trim().to_string()));
+                while let (Some(sha), Some(author), Some(committer)) =
+                    (lines.next(), lines.next(), lines.next())
+                {
+                    result.insert(
+                        sha.trim().to_string(),
+                        (author.trim().to_string(), committer.trim().to_string()),
+                    );
                 }
             }
         }

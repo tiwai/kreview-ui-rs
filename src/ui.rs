@@ -481,12 +481,12 @@ impl TuiApp {
                     }
                     KeyCode::Down | KeyCode::Char('j') => {
                         let inner_height = if let Ok((_, rows)) = crossterm::terminal::size() {
-                            let height = 25.min(rows.saturating_sub(2));
+                            let height = 30.min(rows.saturating_sub(2));
                             height.saturating_sub(2) as usize
                         } else {
                             18
                         };
-                        let max_scroll = 23_usize.saturating_sub(inner_height);
+                        let max_scroll = 38_usize.saturating_sub(inner_height);
                         *scroll_offset = (*scroll_offset + 1).min(max_scroll);
                     }
                     KeyCode::PageUp => {
@@ -494,12 +494,12 @@ impl TuiApp {
                     }
                     KeyCode::PageDown => {
                         let inner_height = if let Ok((_, rows)) = crossterm::terminal::size() {
-                            let height = 25.min(rows.saturating_sub(2));
+                            let height = 30.min(rows.saturating_sub(2));
                             height.saturating_sub(2) as usize
                         } else {
                             18
                         };
-                        let max_scroll = 23_usize.saturating_sub(inner_height);
+                        let max_scroll = 38_usize.saturating_sub(inner_height);
                         *scroll_offset = (*scroll_offset + 5).min(max_scroll);
                     }
                     _ => {}
@@ -797,11 +797,12 @@ impl TuiApp {
                     match key.code {
                         KeyCode::Char('a') => {
                             let committers = self.state.get_unique_committers();
-                            self.active_dialog = ActiveDialog::CommitterFilter(CommitterFilterState {
-                                committers,
-                                selected_index: 0,
-                                scroll_offset: 0,
-                            });
+                            self.active_dialog =
+                                ActiveDialog::CommitterFilter(CommitterFilterState {
+                                    committers,
+                                    selected_index: 0,
+                                    scroll_offset: 0,
+                                });
                             return false;
                         }
                         KeyCode::Char('l') => {
@@ -1465,10 +1466,10 @@ impl TuiApp {
             }
         }
 
-        if let Some(content) = self
-            .state
-            .db
-            .get_review_content(model_id, &commit.sha, "review-inline.txt")
+        if let Some(content) =
+            self.state
+                .db
+                .get_review_content(model_id, &commit.sha, "review-inline.txt")
         {
             return Some((content, None, None, None));
         }
@@ -2284,18 +2285,21 @@ impl TuiApp {
                     list_lines.push(Line::from(Span::styled(format!(" {} ", committer), style)));
                 }
 
-                let current_filter = self.state.author_filter.as_deref().unwrap_or("All Committers");
+                let current_filter = self
+                    .state
+                    .author_filter
+                    .as_deref()
+                    .unwrap_or("All Committers");
                 let p = Paragraph::new(list_lines)
                     .style(
                         Style::default()
                             .fg(theme.default_text_fg)
                             .bg(theme.default_bg),
                     )
-                    .block(
-                        Block::default()
-                            .borders(Borders::ALL)
-                            .title(format!(" Filter by Committer (Current: {}) ", current_filter)),
-                    );
+                    .block(Block::default().borders(Borders::ALL).title(format!(
+                        " Filter by Committer (Current: {}) ",
+                        current_filter
+                    )));
                 f.render_widget(p, area);
             }
             ActiveDialog::SeverityFilter(s) => {
@@ -2431,77 +2435,206 @@ impl TuiApp {
             }
             ActiveDialog::Help(scroll_offset) => {
                 let size = f.size();
-                let width = 72.min(size.width.saturating_sub(2));
-                let height = 25.min(size.height.saturating_sub(2));
+                let width = 74.min(size.width.saturating_sub(2));
+                let height = 30.min(size.height.saturating_sub(2));
                 let area = centered_rect(width, height, size);
 
                 f.render_widget(Clear, area);
 
                 let mut list_lines = Vec::new();
 
-                // Single helper to add items (headers or bindings)
-                let mut add_item = |key: Option<&str>, val: &str| {
-                    if let Some(k) = key {
-                        list_lines.push(Line::from(vec![
-                            Span::styled(
-                                format!("  {:15}", k),
+                {
+                    // Single helper to add items (headers or bindings)
+                    let mut add_item = |key: Option<&str>, val: &str| {
+                        if let Some(k) = key {
+                            list_lines.push(Line::from(vec![
+                                Span::styled(
+                                    format!("  {:15}", k),
+                                    Style::default()
+                                        .fg(theme.help_key_fg)
+                                        .add_modifier(Modifier::BOLD),
+                                ),
+                                Span::styled(" - ", Style::default().fg(theme.help_sep_fg)),
+                                Span::styled(val.to_string(), Style::default()),
+                            ]));
+                        } else {
+                            if !list_lines.is_empty() {
+                                list_lines.push(Line::from(""));
+                            }
+                            list_lines.push(Line::from(Span::styled(
+                                format!(" {} ", val),
                                 Style::default()
-                                    .fg(theme.help_key_fg)
+                                    .fg(theme.selected_fg)
+                                    .bg(theme.selected_bg)
                                     .add_modifier(Modifier::BOLD),
-                            ),
-                            Span::styled(" - ", Style::default().fg(theme.help_sep_fg)),
-                            Span::styled(val.to_string(), Style::default()),
-                        ]));
-                    } else {
-                        if !list_lines.is_empty() {
-                            list_lines.push(Line::from(""));
+                            )));
                         }
-                        list_lines.push(Line::from(Span::styled(
-                            format!(" {} ", val),
-                            Style::default()
-                                .fg(theme.selected_fg)
-                                .bg(theme.selected_bg)
-                                .add_modifier(Modifier::BOLD),
-                        )));
-                    }
-                };
+                    };
 
-                add_item(None, "Navigation & Views");
-                add_item(
-                    Some("Up/Dn, PgUp/Dn"),
-                    "Navigate commits (Table) / Scroll (Viewer)",
-                );
-                add_item(Some("Left / Right"), "Move column selection (Table)");
-                add_item(Some("Home / End"), "Jump to top / bottom");
-                add_item(Some("Enter"), "View commit (Col 0) / View model review");
-                add_item(Some("Esc / q"), "Go back to Main Table (Viewer)");
+                    add_item(None, "Navigation & Views");
+                    add_item(
+                        Some("Up/Dn, PgUp/Dn"),
+                        "Navigate commits (Table) / Scroll (Viewer)",
+                    );
+                    add_item(Some("Left / Right"), "Move column selection (Table)");
+                    add_item(Some("Home / End"), "Jump to top / bottom");
+                    add_item(Some("Enter"), "View commit (Col 0) / View model review");
+                    add_item(Some("Esc / q"), "Go back to Main Table (Viewer)");
 
-                add_item(None, "Filtering & Configuration");
-                add_item(Some("Ctrl+A / L"), "Filter by Committer / Severity level");
-                add_item(Some("Ctrl+F / B"), "Search commit subject / Switch branch");
-                add_item(Some("m"), "Toggle visible model columns");
+                    add_item(None, "Filtering & Configuration");
+                    add_item(Some("Ctrl+A / L"), "Filter by Committer / Severity level");
+                    add_item(Some("Ctrl+F / B"), "Search commit subject / Switch branch");
+                    add_item(Some("m"), "Toggle visible model columns");
 
-                add_item(None, "Actions & Commits");
-                add_item(Some("x"), "Toggle status (Unread -> Ok -> Bad)");
-                add_item(Some("n"), "Add or edit commit note text");
-                add_item(
-                    Some("c / s / u"),
-                    "View Downstream / SUSE / Upstream commit",
-                );
-                add_item(Some("d"), "Show diff (Down vs Up)");
-                add_item(Some("1 - 5"), "Show review for model 1, 2, 3, etc.");
-                add_item(Some("Ctrl+S"), "Save current view to a text file (Viewer)");
+                    add_item(None, "Actions & Commits");
+                    add_item(Some("x"), "Toggle status (Unread -> Ok -> Bad)");
+                    add_item(Some("n"), "Add or edit commit note text");
+                    add_item(
+                        Some("c / s / u"),
+                        "View Downstream / SUSE / Upstream commit",
+                    );
+                    add_item(Some("d"), "Show diff (Down vs Up)");
+                    add_item(Some("1 - 5"), "Show review for model 1, 2, 3, etc.");
+                    add_item(Some("Ctrl+S"), "Save current view to a text file (Viewer)");
 
-                add_item(None, "Global");
-                add_item(Some("h / ?"), "Toggle this help screen");
-                add_item(Some("q"), "Quit application (Table only)");
+                    add_item(None, "Global");
+                    add_item(Some("h / ?"), "Toggle this help screen");
+                    add_item(Some("q"), "Quit application (Table only)");
+                }
+
+                list_lines.push(Line::from(""));
+                list_lines.push(Line::from(Span::styled(
+                    " Table Markers & Legend ",
+                    Style::default()
+                        .fg(theme.selected_fg)
+                        .bg(theme.selected_bg)
+                        .add_modifier(Modifier::BOLD),
+                )));
+
+                list_lines.push(Line::from(Span::styled(
+                    "  [Commit Status]",
+                    Style::default()
+                        .fg(theme.help_key_fg)
+                        .add_modifier(Modifier::BOLD),
+                )));
+                list_lines.push(Line::from(vec![
+                    Span::styled("    ⚪             ", Style::default()),
+                    Span::styled(" - ", Style::default().fg(theme.help_sep_fg)),
+                    Span::raw("Unread (No action taken)"),
+                ]));
+                list_lines.push(Line::from(vec![
+                    Span::styled("    ✅             ", Style::default()),
+                    Span::styled(" - ", Style::default().fg(theme.help_sep_fg)),
+                    Span::raw("Ok (Commit marked as OK)"),
+                ]));
+                list_lines.push(Line::from(vec![
+                    Span::styled("    ❌             ", Style::default()),
+                    Span::styled(" - ", Style::default().fg(theme.help_sep_fg)),
+                    Span::raw("Bad (Commit marked as BAD)"),
+                ]));
+
+                list_lines.push(Line::from(""));
+                list_lines.push(Line::from(Span::styled(
+                    "  [Model Review Cells]",
+                    Style::default()
+                        .fg(theme.help_key_fg)
+                        .add_modifier(Modifier::BOLD),
+                )));
+                list_lines.push(Line::from(vec![
+                    Span::styled("    0              ", Style::default()),
+                    Span::styled(" - ", Style::default().fg(theme.help_sep_fg)),
+                    Span::raw("Zero issues found by the model"),
+                ]));
+                list_lines.push(Line::from(vec![
+                    Span::styled(
+                        "    N              ",
+                        Style::default()
+                            .fg(theme.issue_count_fg)
+                            .bg(theme.issue_count_bg)
+                            .add_modifier(Modifier::BOLD),
+                    ),
+                    Span::styled(" - ", Style::default().fg(theme.help_sep_fg)),
+                    Span::raw("Number of issues found (highlighted)"),
+                ]));
+                list_lines.push(Line::from(vec![
+                    Span::styled(
+                        "    *              ",
+                        Style::default()
+                            .fg(theme.pre_verification_fg)
+                            .add_modifier(Modifier::BOLD),
+                    ),
+                    Span::styled(" - ", Style::default().fg(theme.help_sep_fg)),
+                    Span::raw("Pre-verification result available"),
+                ]));
+                list_lines.push(Line::from(vec![
+                    Span::styled(
+                        "    V              ",
+                        Style::default()
+                            .fg(theme.verified_result_fg)
+                            .add_modifier(Modifier::BOLD),
+                    ),
+                    Span::styled(" - ", Style::default().fg(theme.help_sep_fg)),
+                    Span::raw("Verified result available"),
+                ]));
+                list_lines.push(Line::from(vec![
+                    Span::styled(
+                        "    [N]            ",
+                        Style::default()
+                            .fg(theme.findings_downstream_only_fg)
+                            .add_modifier(Modifier::BOLD),
+                    ),
+                    Span::styled(" - ", Style::default().fg(theme.help_sep_fg)),
+                    Span::raw("N downstream-only findings"),
+                ]));
+                list_lines.push(Line::from(vec![
+                    Span::styled(
+                        "    L / M / H      ",
+                        Style::default().add_modifier(Modifier::BOLD),
+                    ),
+                    Span::styled(" - ", Style::default().fg(theme.help_sep_fg)),
+                    Span::raw("Issue severity: "),
+                    Span::styled(
+                        "Low (L)",
+                        Style::default()
+                            .fg(theme.sev_low)
+                            .add_modifier(Modifier::BOLD),
+                    ),
+                    Span::raw(", "),
+                    Span::styled(
+                        "Medium (M)",
+                        Style::default()
+                            .fg(theme.sev_med)
+                            .add_modifier(Modifier::BOLD),
+                    ),
+                    Span::raw(", "),
+                    Span::styled(
+                        "High (H)",
+                        Style::default()
+                            .fg(theme.sev_high)
+                            .add_modifier(Modifier::BOLD),
+                    ),
+                ]));
+                list_lines.push(Line::from(vec![
+                    Span::styled(
+                        "    +              ",
+                        Style::default()
+                            .fg(Color::Green)
+                            .add_modifier(Modifier::BOLD),
+                    ),
+                    Span::styled(" - ", Style::default().fg(theme.help_sep_fg)),
+                    Span::raw("Fix patch(es) available"),
+                ]));
 
                 let inner_height = area.height.saturating_sub(2) as usize;
                 let max_scroll = list_lines.len().saturating_sub(inner_height);
                 let current_scroll = (*scroll_offset).min(max_scroll);
 
                 let title = if max_scroll > 0 {
-                    format!(" Keyboard Shortcuts & Help (Line {}/{}) ▲▼ ", current_scroll + 1, list_lines.len())
+                    format!(
+                        " Keyboard Shortcuts & Help (Line {}/{}) ▲▼ ",
+                        current_scroll + 1,
+                        list_lines.len()
+                    )
                 } else {
                     " Keyboard Shortcuts & Help ".to_string()
                 };
@@ -2518,11 +2651,7 @@ impl TuiApp {
                             .fg(theme.default_text_fg)
                             .bg(theme.default_bg),
                     )
-                    .block(
-                        Block::default()
-                            .borders(Borders::ALL)
-                            .title(title),
-                    );
+                    .block(Block::default().borders(Borders::ALL).title(title));
                 f.render_widget(p, area);
             }
             ActiveDialog::NoteInput(s) => {
@@ -2751,12 +2880,12 @@ mod tests {
         let mut app = TuiApp::new(state);
 
         let inner_height = if let Ok((_, rows)) = crossterm::terminal::size() {
-            let height = 25.min(rows.saturating_sub(2));
+            let height = 30.min(rows.saturating_sub(2));
             height.saturating_sub(2) as usize
         } else {
             18
         };
-        let max_scroll = 23_usize.saturating_sub(inner_height);
+        let max_scroll = 38_usize.saturating_sub(inner_height);
 
         // Open help dialog
         let h_key = KeyEvent {
