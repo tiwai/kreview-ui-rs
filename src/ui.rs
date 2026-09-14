@@ -238,7 +238,7 @@ pub enum ActiveDialog {
     SubjectSearch(SubjectSearchState),
     ModelToggle(ModelToggleState),
     BranchSwitch(BranchSwitchState),
-    Help,
+    Help(usize),
     NoteInput(NoteInputState),
 }
 
@@ -467,7 +467,7 @@ impl TuiApp {
                 }
                 return false;
             }
-            ActiveDialog::Help => {
+            ActiveDialog::Help(ref mut scroll_offset) => {
                 match key.code {
                     KeyCode::Esc
                     | KeyCode::Char('q')
@@ -475,6 +475,32 @@ impl TuiApp {
                     | KeyCode::Char('?')
                     | KeyCode::Enter => {
                         self.active_dialog = ActiveDialog::None;
+                    }
+                    KeyCode::Up | KeyCode::Char('k') => {
+                        *scroll_offset = scroll_offset.saturating_sub(1);
+                    }
+                    KeyCode::Down | KeyCode::Char('j') => {
+                        let inner_height = if let Ok((_, rows)) = crossterm::terminal::size() {
+                            let height = 25.min(rows.saturating_sub(2));
+                            height.saturating_sub(2) as usize
+                        } else {
+                            18
+                        };
+                        let max_scroll = 23_usize.saturating_sub(inner_height);
+                        *scroll_offset = (*scroll_offset + 1).min(max_scroll);
+                    }
+                    KeyCode::PageUp => {
+                        *scroll_offset = scroll_offset.saturating_sub(5);
+                    }
+                    KeyCode::PageDown => {
+                        let inner_height = if let Ok((_, rows)) = crossterm::terminal::size() {
+                            let height = 25.min(rows.saturating_sub(2));
+                            height.saturating_sub(2) as usize
+                        } else {
+                            18
+                        };
+                        let max_scroll = 23_usize.saturating_sub(inner_height);
+                        *scroll_offset = (*scroll_offset + 5).min(max_scroll);
                     }
                     _ => {}
                 }
@@ -752,7 +778,7 @@ impl TuiApp {
                     });
                 }
             } else if show_help {
-                self.active_dialog = ActiveDialog::Help;
+                self.active_dialog = ActiveDialog::Help(0);
             } else {
                 self.active_screen = ActiveScreen::ContentViewer(s);
             }
@@ -970,7 +996,7 @@ impl TuiApp {
                         self.action_show_review_by_index(4);
                     }
                     KeyCode::Char('h') | KeyCode::Char('?') => {
-                        self.active_dialog = ActiveDialog::Help;
+                        self.active_dialog = ActiveDialog::Help(0);
                     }
                     _ => {}
                 }
@@ -2403,10 +2429,10 @@ impl TuiApp {
                     );
                 f.render_widget(p, area);
             }
-            ActiveDialog::Help => {
+            ActiveDialog::Help(scroll_offset) => {
                 let size = f.size();
                 let width = 72.min(size.width.saturating_sub(2));
-                let height = 23.min(size.height.saturating_sub(2));
+                let height = 25.min(size.height.saturating_sub(2));
                 let area = centered_rect(width, height, size);
 
                 f.render_widget(Clear, area);
@@ -2470,7 +2496,23 @@ impl TuiApp {
                 add_item(Some("h / ?"), "Toggle this help screen");
                 add_item(Some("q"), "Quit application (Table only)");
 
-                let p = Paragraph::new(list_lines)
+                let inner_height = area.height.saturating_sub(2) as usize;
+                let max_scroll = list_lines.len().saturating_sub(inner_height);
+                let current_scroll = (*scroll_offset).min(max_scroll);
+
+                let title = if max_scroll > 0 {
+                    format!(" Keyboard Shortcuts & Help (Line {}/{}) ▲▼ ", current_scroll + 1, list_lines.len())
+                } else {
+                    " Keyboard Shortcuts & Help ".to_string()
+                };
+
+                let visible_lines: Vec<Line> = list_lines
+                    .into_iter()
+                    .skip(current_scroll)
+                    .take(inner_height)
+                    .collect();
+
+                let p = Paragraph::new(visible_lines)
                     .style(
                         Style::default()
                             .fg(theme.default_text_fg)
@@ -2479,7 +2521,7 @@ impl TuiApp {
                     .block(
                         Block::default()
                             .borders(Borders::ALL)
-                            .title(" Keyboard Shortcuts & Help "),
+                            .title(title),
                     );
                 f.render_widget(p, area);
             }
@@ -2668,7 +2710,7 @@ mod tests {
         app.handle_key(h_key);
 
         // Active dialog should now be Help
-        assert!(matches!(app.active_dialog, ActiveDialog::Help));
+        assert!(matches!(app.active_dialog, ActiveDialog::Help(_)));
 
         // Create key event for '?'
         let question_key = KeyEvent {
@@ -2686,7 +2728,7 @@ mod tests {
 
         // Re-open with '?'
         app.handle_key(question_key);
-        assert!(matches!(app.active_dialog, ActiveDialog::Help));
+        assert!(matches!(app.active_dialog, ActiveDialog::Help(_)));
 
         // Create key event for Esc
         let esc_key = KeyEvent {
@@ -2699,6 +2741,86 @@ mod tests {
         // Handle Esc key to close
         app.handle_key(esc_key);
         assert!(matches!(app.active_dialog, ActiveDialog::None));
+    }
+
+    #[test]
+    fn test_help_dialog_scrolling() {
+        let mut config = Config::default();
+        config.database_path = PathBuf::from("nonexistent_db_path_for_test");
+        let state = AppState::new(config);
+        let mut app = TuiApp::new(state);
+
+        let inner_height = if let Ok((_, rows)) = crossterm::terminal::size() {
+            let height = 25.min(rows.saturating_sub(2));
+            height.saturating_sub(2) as usize
+        } else {
+            18
+        };
+        let max_scroll = 23_usize.saturating_sub(inner_height);
+
+        // Open help dialog
+        let h_key = KeyEvent {
+            code: KeyCode::Char('h'),
+            modifiers: KeyModifiers::NONE,
+            kind: KeyEventKind::Press,
+            state: KeyEventState::empty(),
+        };
+        app.handle_key(h_key);
+
+        // Verify it is open with initial scroll offset 0
+        if let ActiveDialog::Help(offset) = app.active_dialog {
+            assert_eq!(offset, 0);
+        } else {
+            panic!("Expected Help dialog to be active");
+        }
+
+        // Press 'j' key to scroll down
+        let j_key = KeyEvent {
+            code: KeyCode::Char('j'),
+            modifiers: KeyModifiers::NONE,
+            kind: KeyEventKind::Press,
+            state: KeyEventState::empty(),
+        };
+        app.handle_key(j_key);
+
+        // Verify scroll offset incremented to 1 (or max_scroll)
+        if let ActiveDialog::Help(offset) = app.active_dialog {
+            assert_eq!(offset, 1.min(max_scroll));
+        } else {
+            panic!("Expected Help dialog to be active");
+        }
+
+        // Press 'k' key to scroll up
+        let k_key = KeyEvent {
+            code: KeyCode::Char('k'),
+            modifiers: KeyModifiers::NONE,
+            kind: KeyEventKind::Press,
+            state: KeyEventState::empty(),
+        };
+        app.handle_key(k_key);
+
+        // Verify scroll offset is back to 0
+        if let ActiveDialog::Help(offset) = app.active_dialog {
+            assert_eq!(offset, 0);
+        } else {
+            panic!("Expected Help dialog to be active");
+        }
+
+        // Press PageDown key
+        let pgdn_key = KeyEvent {
+            code: KeyCode::PageDown,
+            modifiers: KeyModifiers::NONE,
+            kind: KeyEventKind::Press,
+            state: KeyEventState::empty(),
+        };
+        app.handle_key(pgdn_key);
+
+        // Verify scroll offset is 5 (or max_scroll)
+        if let ActiveDialog::Help(offset) = app.active_dialog {
+            assert_eq!(offset, 5.min(max_scroll));
+        } else {
+            panic!("Expected Help dialog to be active");
+        }
     }
 
     #[test]
