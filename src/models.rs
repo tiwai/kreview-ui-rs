@@ -137,6 +137,7 @@ pub struct VerifiedFinding {
     pub upstream_status: Option<String>,
 
     // Older format
+    #[serde(alias = "verification_status", alias = "verification-status")]
     pub verified_status: Option<String>,
     pub verification_comments: Option<String>,
 
@@ -157,6 +158,7 @@ pub struct VerifiedFinding {
     pub reason: Option<String>,
     pub reasoning: Option<String>,
     pub verification_explanation: Option<String>,
+    pub explanation: Option<String>,
 }
 
 impl VerifiedFinding {
@@ -169,8 +171,9 @@ impl VerifiedFinding {
     }
 
     pub fn comment(&self) -> Option<&str> {
-        self.reason
+        self.explanation
             .as_deref()
+            .or(self.reason.as_deref())
             .or(self.reasoning.as_deref())
             .or(self.verification_explanation.as_deref())
             .or(self.verification_detail.as_deref())
@@ -868,6 +871,36 @@ mod tests {
 
         let rendered = verified.render_with_width(80);
         assert!(rendered.contains("Verification-comment:\nThis is the reasoning for the leak."));
+    }
+
+    #[test]
+    fn test_verified_result_explanation_and_verification_status() {
+        let json_data = r#"{
+          "commit": "161e965e03d20d62201e0757bd95e7cfebbd1d61",
+          "model": "qwen3.8-27b",
+          "findings": [
+            {
+              "category": "CHANGE-3",
+              "type": "behavioral-change",
+              "severity": "medium",
+              "verification_status": "valid",
+              "message": "Some message.",
+              "evidence": "Some evidence.",
+              "upstream_status": "downstream_only",
+              "explanation": "This is the explanation tag."
+            }
+          ]
+        }"#;
+
+        let verified: VerifiedResult = serde_json::from_str(json_data).unwrap();
+        let findings = verified.findings();
+        assert_eq!(findings.len(), 1);
+        assert_eq!(findings[0].status(), Some("valid"));
+        assert_eq!(findings[0].comment(), Some("This is the explanation tag."));
+
+        let rendered = verified.render_with_width(80);
+        assert!(rendered.contains("Verification-status: valid"));
+        assert!(rendered.contains("Verification-comment:\nThis is the explanation tag."));
     }
 
     #[test]
