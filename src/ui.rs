@@ -1406,8 +1406,15 @@ impl TuiApp {
         else {
             return;
         };
-        let Ok(verified) = serde_json::from_str::<VerifiedResult>(&json_str) else {
-            return;
+        let verified = match serde_json::from_str::<VerifiedResult>(&json_str) {
+            Ok(v) => v,
+            Err(e) => {
+                self.status_message = Some((
+                    format!("Failed to parse verified-result.json: {}", e),
+                    Instant::now(),
+                ));
+                return;
+            }
         };
 
         let width = if let Ok((cols, _)) = crossterm::terminal::size() {

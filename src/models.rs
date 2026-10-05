@@ -123,34 +123,163 @@ pub struct InlineReview {
     pub total_tokens: u64,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+fn deserialize_string_or_map<'de, D>(deserializer: D) -> Result<Option<String>, D::Error>
+where
+    D: serde::Deserializer<'de>,
+{
+    struct StringOrMapVisitor;
+
+    impl<'de> serde::de::Visitor<'de> for StringOrMapVisitor {
+        type Value = Option<String>;
+
+        fn expecting(&self, formatter: &mut std::fmt::Formatter) -> std::fmt::Result {
+            formatter.write_str("a string, map, or null")
+        }
+
+        fn visit_none<E>(self) -> Result<Self::Value, E>
+        where
+            E: serde::de::Error,
+        {
+            Ok(None)
+        }
+
+        fn visit_unit<E>(self) -> Result<Self::Value, E>
+        where
+            E: serde::de::Error,
+        {
+            Ok(None)
+        }
+
+        fn visit_str<E>(self, v: &str) -> Result<Self::Value, E>
+        where
+            E: serde::de::Error,
+        {
+            Ok(Some(v.to_string()))
+        }
+
+        fn visit_string<E>(self, v: String) -> Result<Self::Value, E>
+        where
+            E: serde::de::Error,
+        {
+            Ok(Some(v))
+        }
+
+        fn visit_map<M>(self, mut access: M) -> Result<Self::Value, M::Error>
+        where
+            M: serde::de::MapAccess<'de>,
+        {
+            let mut parts = Vec::new();
+            while let Some((key, value)) = access.next_entry::<String, serde_json::Value>()? {
+                if let Some(s) = value.as_str() {
+                    parts.push(format!("{}: {}", key, s));
+                } else {
+                    parts.push(format!("{}: {}", key, value));
+                }
+            }
+            if parts.is_empty() {
+                Ok(None)
+            } else {
+                Ok(Some(parts.join("\n")))
+            }
+        }
+    }
+
+    deserializer.deserialize_any(StringOrMapVisitor)
+}
+
+fn parse_verified_finding_value(val: &serde_json::Value) -> Option<VerifiedFinding> {
+    match val {
+        serde_json::Value::Object(map) => {
+            let inner = map
+                .get("original")
+                .or_else(|| map.get("finding"))
+                .and_then(|v| v.as_object());
+            if let Some(inner_map) = inner {
+                let mut merged = inner_map.clone();
+                for (k, v) in map {
+                    if k != "original" && k != "finding" {
+                        merged.insert(k.clone(), v.clone());
+                    }
+                }
+                serde_json::from_value::<VerifiedFinding>(serde_json::Value::Object(merged)).ok()
+            } else {
+                serde_json::from_value::<VerifiedFinding>(val.clone()).ok()
+            }
+        }
+        _ => None,
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub struct VerifiedFinding {
     pub category: Option<String>,
     #[serde(rename = "type")]
     pub finding_type: Option<String>,
     pub severity: Option<Severity>,
+    #[serde(alias = "original-severity", alias = "severity-adjusted")]
+    pub adjusted_severity: Option<Severity>,
     pub confidence: Option<serde_json::Value>,
-    #[serde(alias = "reported-message")]
+    #[serde(
+        alias = "reported-message",
+        alias = "original-message",
+        alias = "summary",
+        alias = "description"
+    )]
     pub message: Option<String>,
+    #[serde(alias = "reported-evidence", alias = "reported_evidence")]
     pub evidence: Option<String>,
     #[serde(rename = "upstream-status")]
     pub upstream_status: Option<String>,
+    #[serde(rename = "upstream_status")]
+    pub upstream_status_alt: Option<String>,
+    #[serde(rename = "upstream_note")]
+    pub upstream_note: Option<String>,
+
+    #[serde(alias = "analysis")]
+    pub details: Option<String>,
 
     // Older format
     #[serde(alias = "verification_status", alias = "verification-status")]
     pub verified_status: Option<String>,
+    #[serde(
+        rename = "verification-comments",
+        alias = "verification_comments",
+        alias = "verification-comment"
+    )]
     pub verification_comments: Option<String>,
 
     // Newer format
     #[serde(rename = "re-verification-status")]
     pub re_verification_status: Option<String>,
+    #[serde(
+        rename = "re_verification_status",
+        alias = "re-verified-status",
+        alias = "re_verified_status"
+    )]
+    pub re_verification_status_alt: Option<String>,
+
     #[serde(rename = "re-verification-comment")]
     pub re_verification_comment: Option<String>,
+    #[serde(
+        rename = "re_verification_comment",
+        alias = "re-verified-comment",
+        alias = "re_verified_comment"
+    )]
+    pub re_verification_comment_alt: Option<String>,
 
     // Claude format
     #[serde(alias = "verification")]
     pub verdict: Option<String>,
-    #[serde(alias = "verification-note")]
+    #[serde(
+        default,
+        deserialize_with = "deserialize_string_or_map",
+        alias = "verification-note",
+        alias = "verification_note",
+        alias = "notes",
+        alias = "note",
+        alias = "verification-notes",
+        alias = "verification_notes"
+    )]
     pub verification_detail: Option<String>,
 
     // Gemini new format
@@ -159,26 +288,107 @@ pub struct VerifiedFinding {
     pub reasoning: Option<String>,
     pub verification_explanation: Option<String>,
     pub explanation: Option<String>,
+
+    // Additional fields from results and verifications
+    pub action: Option<String>,
+    pub validity: Option<String>,
+    pub comment: Option<String>,
+    #[serde(rename = "future-fix", alias = "future_fix", alias = "later-fix", alias = "later_fix")]
+    pub future_fix: Option<serde_json::Value>,
+    #[serde(rename = "fixed-by", alias = "fixed_by")]
+    pub fixed_by: Option<serde_json::Value>,
+    #[serde(
+        rename = "in-upstream",
+        alias = "in_upstream",
+        alias = "inherited-from-upstream",
+        alias = "inherited_from_upstream",
+        alias = "upstream-present",
+        alias = "present-in-upstream"
+    )]
+    pub in_upstream: Option<serde_json::Value>,
 }
 
 impl VerifiedFinding {
     pub fn status(&self) -> Option<&str> {
-        self.status
+        self.verdict
             .as_deref()
-            .or(self.verdict.as_deref())
+            .or(self.status.as_deref())
+            .or(self.action.as_deref())
+            .or(self.validity.as_deref())
             .or(self.re_verification_status.as_deref())
+            .or(self.re_verification_status_alt.as_deref())
             .or(self.verified_status.as_deref())
     }
 
     pub fn comment(&self) -> Option<&str> {
-        self.explanation
+        self.verification_detail
             .as_deref()
+            .or(self.explanation.as_deref())
             .or(self.reason.as_deref())
             .or(self.reasoning.as_deref())
             .or(self.verification_explanation.as_deref())
-            .or(self.verification_detail.as_deref())
             .or(self.re_verification_comment.as_deref())
+            .or(self.re_verification_comment_alt.as_deref())
             .or(self.verification_comments.as_deref())
+            .or(self.comment.as_deref())
+            .or(self.details.as_deref())
+    }
+
+    pub fn effective_severity(&self) -> Option<Severity> {
+        self.adjusted_severity.or(self.severity)
+    }
+
+    pub fn upstream_status_str(&self) -> Option<&str> {
+        self.upstream_status
+            .as_deref()
+            .or(self.upstream_status_alt.as_deref())
+            .or_else(|| {
+                if let Some(ref v) = self.in_upstream {
+                    match v {
+                        serde_json::Value::Bool(true) => Some("present_in_upstream"),
+                        serde_json::Value::Bool(false) => Some("downstream_only"),
+                        serde_json::Value::String(s) => Some(s.as_str()),
+                        _ => None,
+                    }
+                } else {
+                    None
+                }
+            })
+    }
+
+    pub fn future_fix_string(&self) -> Option<String> {
+        if let Some(ref fix) = self.future_fix {
+            if let Some(s) = fix.as_str() {
+                if !s.trim().is_empty() && s.trim().to_lowercase() != "null" {
+                    return Some(s.to_string());
+                }
+            } else if !fix.is_null() {
+                return Some(fix.to_string());
+            }
+        }
+        if let Some(ref fix) = self.fixed_by {
+            if let Some(s) = fix.as_str() {
+                if !s.trim().is_empty() && s.trim().to_lowercase() != "null" {
+                    return Some(s.to_string());
+                }
+            } else if let Some(obj) = fix.as_object() {
+                let mut parts = Vec::new();
+                if let Some(up) = obj.get("upstream").and_then(|v| v.as_str()) {
+                    parts.push(format!("upstream {}", up));
+                }
+                if let Some(sub) = obj.get("subject").and_then(|v| v.as_str()) {
+                    parts.push(format!("\"{}\"", sub));
+                }
+                if let Some(rel) = obj.get("release").and_then(|v| v.as_str()) {
+                    parts.push(format!("({})", rel));
+                }
+                if !parts.is_empty() {
+                    return Some(parts.join(" "));
+                }
+                return Some(fix.to_string());
+            }
+        }
+        None
     }
 }
 
@@ -188,22 +398,39 @@ pub struct VerifiedResult {
     pub commit: String,
     #[serde(default)]
     pub model: String,
-    #[serde(rename = "verifier-model")]
+    #[serde(
+        rename = "verifier-model",
+        alias = "verifier_model",
+        alias = "verifier",
+        alias = "verified-by",
+        alias = "verified_by"
+    )]
     pub verifier_model: Option<String>,
     pub subject: Option<String>,
-    #[serde(rename = "distro-commit")]
+    #[serde(rename = "distro-commit", alias = "distro_commit")]
     pub distro_commit: Option<String>,
-    #[serde(rename = "upstream-commit")]
+    #[serde(rename = "upstream-commit", alias = "upstream_commit")]
     pub upstream_commit: Option<String>,
 
     #[serde(rename = "re-verified-by")]
     pub re_verified_by: Option<String>,
+    #[serde(rename = "re_verified_by")]
+    pub re_verified_by_alt: Option<String>,
+
     #[serde(rename = "re-verified-date")]
     pub re_verified_date: Option<String>,
+    #[serde(rename = "re_verified_date")]
+    pub re_verified_date_alt: Option<String>,
     #[serde(rename = "re-verification-date")]
     pub re_verification_date: Option<String>,
+    #[serde(rename = "re_verification_date")]
+    pub re_verification_date_alt: Option<String>,
 
-    #[serde(rename = "re-verification-summary")]
+    #[serde(
+        rename = "re-verification-summary",
+        alias = "verification-summary",
+        alias = "verification_summary"
+    )]
     pub re_verification_summary: Option<String>,
     pub summary: Option<String>,
 
@@ -212,32 +439,119 @@ pub struct VerifiedResult {
 
     #[serde(rename = "issues-found")]
     pub issues_found: Option<u32>,
-    #[serde(rename = "total-findings-before-verification")]
+    #[serde(rename = "issues_found")]
+    pub issues_found_alt: Option<u32>,
+
+    #[serde(
+        rename = "total-findings-before-verification",
+        alias = "total_findings_before_verification",
+        alias = "original-findings",
+        alias = "original_findings",
+        alias = "original-issues",
+        alias = "original_issues",
+        alias = "total-findings",
+        alias = "total_findings"
+    )]
     pub total_findings_before_verification: Option<u32>,
-    #[serde(rename = "confirmed-findings")]
+
+    #[serde(
+        rename = "confirmed-findings",
+        alias = "confirmed-issues",
+        alias = "confirmed_issues"
+    )]
     pub confirmed_findings_raw: Option<serde_json::Value>,
-    #[serde(rename = "issues-confirmed")]
+    #[serde(rename = "confirmed")]
+    pub confirmed_raw: Option<serde_json::Value>,
+
+    #[serde(
+        rename = "issues-confirmed",
+        alias = "issues_confirmed",
+        alias = "valid-issues",
+        alias = "valid_issues"
+    )]
     pub issues_confirmed: Option<u32>,
-    #[serde(rename = "pruned-findings-count", alias = "issues-pruned")]
+
+    #[serde(
+        rename = "pruned-findings-count",
+        alias = "issues-pruned",
+        alias = "issues_pruned",
+        alias = "pruned-count",
+        alias = "pruned_count"
+    )]
     pub pruned_findings_count: Option<u32>,
+
+    #[serde(rename = "pruned-findings")]
+    pub pruned_findings_raw: Option<serde_json::Value>,
+    #[serde(rename = "pruned_entries")]
+    pub pruned_entries_raw: Option<serde_json::Value>,
+    #[serde(rename = "pruned")]
+    pub pruned_raw: Option<serde_json::Value>,
 
     #[serde(alias = "verified-findings", default)]
     pub findings: Vec<VerifiedFinding>,
     #[serde(rename = "findings-evaluation", default)]
     pub findings_evaluation: Vec<VerifiedFinding>,
+    #[serde(default)]
+    pub results: Vec<serde_json::Value>,
+    #[serde(default)]
+    pub verifications: Vec<serde_json::Value>,
 
-    #[serde(rename = "pruned-findings", default)]
-    pub pruned_findings: Vec<VerifiedFinding>,
+    #[serde(rename = "later-fix")]
+    pub later_fix: Option<serde_json::Value>,
+    #[serde(rename = "future_fix_notes")]
+    pub future_fix_notes: Option<serde_json::Value>,
+    #[serde(
+        rename = "later_fix",
+        alias = "later-fixes",
+        alias = "later_fixes"
+    )]
+    pub later_fix_alt: Option<serde_json::Value>,
 }
 
 impl VerifiedResult {
+    pub fn issues_found(&self) -> Option<u32> {
+        self.issues_found.or(self.issues_found_alt)
+    }
+
+    pub fn re_verified_by(&self) -> Option<&str> {
+        self.re_verified_by
+            .as_deref()
+            .or(self.re_verified_by_alt.as_deref())
+    }
+
     pub fn confirmed_findings(&self) -> Option<u32> {
         self.issues_confirmed.or_else(|| {
-            self.confirmed_findings_raw.as_ref().and_then(|v| match v {
-                serde_json::Value::Number(n) => n.as_u64().map(|x| x as u32),
-                serde_json::Value::Array(arr) => Some(arr.len() as u32),
-                _ => None,
-            })
+            for raw in [&self.confirmed_findings_raw, &self.confirmed_raw] {
+                if let Some(v) = raw {
+                    match v {
+                        serde_json::Value::Number(n) => return n.as_u64().map(|x| x as u32),
+                        serde_json::Value::Array(arr) => return Some(arr.len() as u32),
+                        _ => {}
+                    }
+                }
+            }
+            None
+        })
+    }
+
+    pub fn pruned_findings_count(&self) -> Option<u32> {
+        self.pruned_findings_count.or_else(|| {
+            for raw in [
+                &self.pruned_raw,
+                &self.pruned_findings_raw,
+                &self.pruned_entries_raw,
+            ] {
+                if let Some(v) = raw {
+                    match v {
+                        serde_json::Value::Number(n) => return n.as_u64().map(|x| x as u32),
+                        serde_json::Value::Array(arr) if !arr.is_empty() => {
+                            return Some(arr.len() as u32)
+                        }
+                        _ => {}
+                    }
+                }
+            }
+            None
         })
     }
 
@@ -246,15 +560,49 @@ impl VerifiedResult {
             self.findings.clone()
         } else if !self.findings_evaluation.is_empty() {
             self.findings_evaluation.clone()
+        } else if !self.results.is_empty() {
+            self.results
+                .iter()
+                .filter_map(parse_verified_finding_value)
+                .collect()
+        } else if !self.verifications.is_empty() {
+            self.verifications
+                .iter()
+                .filter_map(parse_verified_finding_value)
+                .collect()
         } else if let Some(ref v) = self.confirmed_findings_raw {
             if let Ok(list) = serde_json::from_value::<Vec<VerifiedFinding>>(v.clone()) {
                 list
+            } else if let Some(arr) = v.as_array() {
+                arr.iter().filter_map(parse_verified_finding_value).collect()
+            } else {
+                Vec::new()
+            }
+        } else if let Some(ref v) = self.confirmed_raw {
+            if let Ok(list) = serde_json::from_value::<Vec<VerifiedFinding>>(v.clone()) {
+                list
+            } else if let Some(arr) = v.as_array() {
+                arr.iter().filter_map(parse_verified_finding_value).collect()
             } else {
                 Vec::new()
             }
         } else {
             Vec::new()
         }
+    }
+
+    pub fn pruned_findings(&self) -> Vec<VerifiedFinding> {
+        let raw = self
+            .pruned_findings_raw
+            .as_ref()
+            .or(self.pruned_entries_raw.as_ref())
+            .or(self.pruned_raw.as_ref());
+        if let Some(v) = raw {
+            if let Some(arr) = v.as_array() {
+                return arr.iter().filter_map(parse_verified_finding_value).collect();
+            }
+        }
+        Vec::new()
     }
 
     pub fn render_with_width(&self, width: usize) -> String {
@@ -282,13 +630,15 @@ impl VerifiedResult {
             out.push_str(&format!("Re-verification-model: {}\n", self.model));
         }
 
-        if let Some(ref by) = self.re_verified_by {
+        if let Some(by) = self.re_verified_by() {
             out.push_str(&format!("Re-verified-by: {}\n", by));
         }
         let date_text = self
             .re_verified_date
             .as_deref()
-            .or(self.re_verification_date.as_deref());
+            .or(self.re_verified_date_alt.as_deref())
+            .or(self.re_verification_date.as_deref())
+            .or(self.re_verification_date_alt.as_deref());
         if let Some(date) = date_text {
             out.push_str(&format!("Re-verified-date: {}\n", date));
         }
@@ -298,7 +648,7 @@ impl VerifiedResult {
         if let Some(v) = self.verified {
             out.push_str(&format!("Verified: {}\n", v));
         }
-        if let Some(n) = self.issues_found {
+        if let Some(n) = self.issues_found() {
             out.push_str(&format!("Issues-found: {}\n", n));
         }
         if let Some(n) = self.total_findings_before_verification {
@@ -307,7 +657,7 @@ impl VerifiedResult {
         if let Some(n) = self.confirmed_findings() {
             out.push_str(&format!("Confirmed-findings: {}\n", n));
         }
-        if let Some(n) = self.pruned_findings_count {
+        if let Some(n) = self.pruned_findings_count() {
             out.push_str(&format!("Pruned-findings-count: {}\n", n));
         }
 
@@ -319,6 +669,20 @@ impl VerifiedResult {
             out.push_str("\n=== Re-verification Summary ===\n");
             out.push_str(&wrap_text(summary, width));
             out.push('\n');
+        }
+
+        let later_fix_text = self
+            .later_fix
+            .as_ref()
+            .or(self.future_fix_notes.as_ref())
+            .or(self.later_fix_alt.as_ref())
+            .and_then(|v| v.as_str());
+        if let Some(s) = later_fix_text {
+            if !s.trim().is_empty() && s.trim().to_lowercase() != "null" {
+                out.push_str("\n=== Later Fix ===\n");
+                out.push_str(&wrap_text(s, width));
+                out.push('\n');
+            }
         }
 
         let findings = self.findings();
@@ -333,8 +697,20 @@ impl VerifiedResult {
                 if let Some(ref f_type) = finding.finding_type {
                     out.push_str(&format!("Type: {}\n", f_type));
                 }
-                if let Some(sev) = finding.severity {
-                    out.push_str(&format!("Severity: {}\n", sev.as_str()));
+                if let Some(sev) = finding.effective_severity() {
+                    if let (Some(adj), Some(orig)) = (finding.adjusted_severity, finding.severity) {
+                        if adj != orig {
+                            out.push_str(&format!(
+                                "Severity: {} (adjusted from {})\n",
+                                adj.as_str(),
+                                orig.as_str()
+                            ));
+                        } else {
+                            out.push_str(&format!("Severity: {}\n", sev.as_str()));
+                        }
+                    } else {
+                        out.push_str(&format!("Severity: {}\n", sev.as_str()));
+                    }
                 }
                 if let Some(ref conf) = finding.confidence {
                     let conf_str = match conf {
@@ -344,8 +720,13 @@ impl VerifiedResult {
                     };
                     out.push_str(&format!("Confidence: {}\n", conf_str));
                 }
-                if let Some(ref us) = finding.upstream_status {
+                if let Some(us) = finding.upstream_status_str() {
                     out.push_str(&format!("Upstream-status: {}\n", us));
+                }
+                if let Some(ref un) = finding.upstream_note {
+                    out.push_str("\nUpstream-note:\n");
+                    out.push_str(&wrap_text(un, width));
+                    out.push('\n');
                 }
 
                 if let Some(ref msg) = finding.message {
@@ -367,12 +748,18 @@ impl VerifiedResult {
                     out.push_str(&wrap_text(comment, width));
                     out.push('\n');
                 }
+                if let Some(ref fix) = finding.future_fix_string() {
+                    out.push_str("\nFuture-fix:\n");
+                    out.push_str(&wrap_text(fix, width));
+                    out.push('\n');
+                }
             }
         }
 
-        if !self.pruned_findings.is_empty() {
+        let pruned_findings = self.pruned_findings();
+        if !pruned_findings.is_empty() {
             out.push_str("\n=== Pruned Findings ===\n");
-            for (i, finding) in self.pruned_findings.iter().enumerate() {
+            for (i, finding) in pruned_findings.iter().enumerate() {
                 out.push_str(&format!("\n=== Pruned Finding {} ===\n", i + 1));
 
                 if let Some(ref cat) = finding.category {
@@ -381,13 +768,34 @@ impl VerifiedResult {
                 if let Some(ref f_type) = finding.finding_type {
                     out.push_str(&format!("Type: {}\n", f_type));
                 }
-                if let Some(sev) = finding.severity {
+                if let Some(sev) = finding.effective_severity() {
                     out.push_str(&format!("Severity: {}\n", sev.as_str()));
+                }
+                if let Some(ref conf) = finding.confidence {
+                    let conf_str = match conf {
+                        serde_json::Value::String(s) => s.clone(),
+                        serde_json::Value::Number(n) => n.to_string(),
+                        _ => conf.to_string(),
+                    };
+                    out.push_str(&format!("Confidence: {}\n", conf_str));
+                }
+                if let Some(us) = finding.upstream_status_str() {
+                    out.push_str(&format!("Upstream-status: {}\n", us));
+                }
+                if let Some(ref un) = finding.upstream_note {
+                    out.push_str("\nUpstream-note:\n");
+                    out.push_str(&wrap_text(un, width));
+                    out.push('\n');
                 }
 
                 if let Some(ref msg) = finding.message {
                     out.push_str("\nMessage:\n");
                     out.push_str(&wrap_text(msg, width));
+                    out.push('\n');
+                }
+                if let Some(ref ev) = finding.evidence {
+                    out.push_str("\nEvidence:\n");
+                    out.push_str(&wrap_code(ev, width));
                     out.push('\n');
                 }
 
@@ -397,6 +805,11 @@ impl VerifiedResult {
                 if let Some(comment) = finding.comment() {
                     out.push_str("\nVerification-comment:\n");
                     out.push_str(&wrap_text(comment, width));
+                    out.push('\n');
+                }
+                if let Some(ref fix) = finding.future_fix_string() {
+                    out.push_str("\nFuture-fix:\n");
+                    out.push_str(&wrap_text(fix, width));
                     out.push('\n');
                 }
             }
@@ -980,5 +1393,144 @@ mod tests {
                 errors.join("\n")
             );
         }
+    }
+
+    #[test]
+    fn test_verified_result_claude_opus_results() {
+        let json_data = r#"{
+          "commit": "02c81408189b3443df4188247d173a195b08bd64",
+          "model": "mglimmer",
+          "verified-by": "claude-opus-5-5",
+          "upstream-commit": "d27d48a528e437aed690f977e69a6fe73fe82ab5",
+          "distro-commit": "f5acd19289416f0c6f830b8612b6af48ce740c8e",
+          "original-findings": 1,
+          "confirmed": 1,
+          "pruned": 0,
+          "results": [
+            {
+              "original": {
+                "category": "CHANGE-1",
+                "type": "uninitialized-variable",
+                "severity": "high",
+                "confidence": 0.75,
+                "message": "Method in acpi_install_method() can be used uninitialized on an error path.",
+                "evidence": "ACPI_HANDLE method;\nif (ACPI_FAILURE(status))\n    return status;\nacpi_install_method(method);"
+              },
+              "verdict": "CONFIRMED",
+              "severity-adjusted": "low",
+              "in-upstream": true,
+              "future-fix": null,
+              "notes": "CONFIRMED. In acpi_install_method() the issue is present but severity is low."
+            }
+          ]
+        }"#;
+
+        let verified: VerifiedResult = serde_json::from_str(json_data).unwrap();
+        assert_eq!(verified.commit, "02c81408189b3443df4188247d173a195b08bd64");
+        assert_eq!(verified.model, "mglimmer");
+        assert_eq!(verified.verifier_model, Some("claude-opus-5-5".to_string()));
+        assert_eq!(verified.total_findings_before_verification, Some(1));
+        assert_eq!(verified.confirmed_findings(), Some(1));
+        assert_eq!(verified.pruned_findings_count(), Some(0));
+
+        let findings = verified.findings();
+        assert_eq!(findings.len(), 1);
+        assert_eq!(findings[0].category, Some("CHANGE-1".to_string()));
+        assert_eq!(findings[0].finding_type, Some("uninitialized-variable".to_string()));
+        assert_eq!(findings[0].effective_severity(), Some(Severity::Low));
+        assert_eq!(findings[0].status(), Some("CONFIRMED"));
+        assert_eq!(findings[0].upstream_status_str(), Some("present_in_upstream"));
+        assert!(findings[0].comment().unwrap().contains("In acpi_install_method()"));
+
+        let rendered = verified.render_with_width(80);
+        assert!(rendered.contains("commit 02c81408189b3443df4188247d173a195b08bd64"));
+        assert!(rendered.contains("Model: mglimmer"));
+        assert!(rendered.contains("Verifier-model: claude-opus-5-5"));
+        assert!(rendered.contains("Upstream-commit: d27d48a528e437aed690f977e69a6fe73fe82ab5"));
+        assert!(rendered.contains("Distro-commit: f5acd19289416f0c6f830b8612b6af48ce740c8e"));
+        assert!(rendered.contains("Total-findings-before-verification: 1"));
+        assert!(rendered.contains("Confirmed-findings: 1"));
+        assert!(rendered.contains("Pruned-findings-count: 0"));
+        assert!(rendered.contains("Severity: low (adjusted from high)"));
+        assert!(rendered.contains("Upstream-status: present_in_upstream"));
+        assert!(rendered.contains("Verification-status: CONFIRMED"));
+        assert!(rendered.contains("Verification-comment:\nCONFIRMED. In acpi_install_method()"));
+    }
+
+    #[test]
+    fn test_verified_result_integer_pruned_and_fixed_by() {
+        let json_data = r#"{
+          "commit": "4375526226a96dbfcd0707f81cb5f7f9416948fa",
+          "model": "qwen3.8-27b",
+          "verifier": "Claude",
+          "total-findings": 1,
+          "confirmed-findings": 0,
+          "pruned-findings": 1,
+          "results": [
+            {
+              "category": "CHANGE-1",
+              "type": "null-deref",
+              "severity": "high",
+              "message": "Potential null dereference",
+              "verdict": "false-positive",
+              "action": "pruned",
+              "notes": "Checked call chain; pointer is guaranteed non-null.",
+              "fixed-by": {
+                "upstream": "abc12345",
+                "subject": "fix null deref",
+                "release": "v6.12"
+              }
+            }
+          ]
+        }"#;
+
+        let verified: VerifiedResult = serde_json::from_str(json_data).unwrap();
+        assert_eq!(verified.verifier_model, Some("Claude".to_string()));
+        assert_eq!(verified.total_findings_before_verification, Some(1));
+        assert_eq!(verified.confirmed_findings(), Some(0));
+        assert_eq!(verified.pruned_findings_count(), Some(1));
+
+        let findings = verified.findings();
+        assert_eq!(findings.len(), 1);
+        assert_eq!(findings[0].status(), Some("false-positive"));
+        assert_eq!(findings[0].future_fix_string(), Some("upstream abc12345 \"fix null deref\" (v6.12)".to_string()));
+
+        let rendered = verified.render_with_width(80);
+        assert!(rendered.contains("Future-fix:\nupstream abc12345 \"fix null deref\" (v6.12)"));
+    }
+
+    #[test]
+    fn test_verified_result_verification_notes_map() {
+        let json_data = r#"{
+          "commit": "4d285175182b57909c2c29aa093f6dce895e1fe9",
+          "model": "qwen3.6",
+          "verified-by": "claude",
+          "findings": [
+            {
+              "category": "CHANGE-4",
+              "type": "resource-leak",
+              "severity": "medium",
+              "verdict": "confirmed",
+              "message": "Missing of_node_put",
+              "upstream_status": "upstream",
+              "upstream_note": "The same bug is present in upstream commit 75fb63ae0312",
+              "verification_notes": {
+                "path_reachable": "rockchip_grf_init() is __init",
+                "refcount_proof": "of_find_matching_node_and_match() docs state it leaks."
+              }
+            }
+          ]
+        }"#;
+
+        let verified: VerifiedResult = serde_json::from_str(json_data).unwrap();
+        let findings = verified.findings();
+        assert_eq!(findings.len(), 1);
+        let comment = findings[0].comment().unwrap();
+        assert!(comment.contains("path_reachable: rockchip_grf_init() is __init"));
+        assert!(comment.contains("refcount_proof: of_find_matching_node_and_match() docs state it leaks."));
+
+        let rendered = verified.render_with_width(80);
+        assert!(rendered.contains("Upstream-note:\nThe same bug is present in upstream commit 75fb63ae0312"));
+        assert!(rendered.contains("path_reachable: rockchip_grf_init() is __init"));
     }
 }
