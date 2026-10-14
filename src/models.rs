@@ -187,6 +187,75 @@ where
     deserializer.deserialize_any(StringOrMapVisitor)
 }
 
+fn parse_verified_finding_from_map(map: &serde_json::Map<String, serde_json::Value>) -> Option<VerifiedFinding> {
+    let mut f = VerifiedFinding::default();
+    f.category = map.get("category").and_then(|v| v.as_str()).map(String::from);
+    f.finding_type = map.get("type").and_then(|v| v.as_str()).map(String::from);
+    if let Some(sev) = map.get("severity") {
+        f.severity = serde_json::from_value(sev.clone()).ok();
+    }
+    if let Some(adj) = map.get("severity-adjusted").or_else(|| map.get("original-severity")) {
+        f.adjusted_severity = serde_json::from_value(adj.clone()).ok();
+    }
+    f.confidence = map.get("confidence").cloned();
+    f.message = map
+        .get("message")
+        .or_else(|| map.get("reported-message"))
+        .or_else(|| map.get("original-message"))
+        .or_else(|| map.get("summary"))
+        .or_else(|| map.get("description"))
+        .and_then(|v| v.as_str())
+        .map(String::from);
+    f.evidence = map
+        .get("evidence")
+        .or_else(|| map.get("reported-evidence"))
+        .or_else(|| map.get("reported_evidence"))
+        .and_then(|v| v.as_str())
+        .map(String::from);
+    f.upstream_status = map.get("upstream-status").and_then(|v| v.as_str()).map(String::from);
+    f.upstream_status_alt = map.get("upstream_status").and_then(|v| v.as_str()).map(String::from);
+    f.upstream_note = map.get("upstream_note").and_then(|v| v.as_str()).map(String::from);
+    f.details = map.get("analysis").and_then(|v| v.as_str()).map(String::from);
+    f.verified_status = map
+        .get("verification_status")
+        .or_else(|| map.get("verification-status"))
+        .and_then(|v| v.as_str())
+        .map(String::from);
+    f.verification_comments = map
+        .get("verification-comments")
+        .or_else(|| map.get("verification_comments"))
+        .or_else(|| map.get("verification-comment"))
+        .and_then(|v| v.as_str())
+        .map(String::from);
+    f.re_verification_status = map.get("re-verification-status").and_then(|v| v.as_str()).map(String::from);
+    f.re_verification_status_alt = map
+        .get("re_verification_status")
+        .or_else(|| map.get("re-verified-status"))
+        .or_else(|| map.get("re_verified_status"))
+        .and_then(|v| v.as_str())
+        .map(String::from);
+    f.re_verification_comment = map.get("re-verification-comment").and_then(|v| v.as_str()).map(String::from);
+    f.re_verification_comment_alt = map
+        .get("re_verification_comment")
+        .or_else(|| map.get("re-verified-comment"))
+        .or_else(|| map.get("re_verified_comment"))
+        .and_then(|v| v.as_str())
+        .map(String::from);
+    f.verdict = map.get("verdict").or_else(|| map.get("verification")).and_then(|v| v.as_str()).map(String::from);
+    f.status = map.get("status").and_then(|v| v.as_str()).map(String::from);
+    f.reason = map.get("reason").and_then(|v| v.as_str()).map(String::from);
+    f.reasoning = map.get("reasoning").and_then(|v| v.as_str()).map(String::from);
+    f.verification_explanation = map.get("verification_explanation").and_then(|v| v.as_str()).map(String::from);
+    f.explanation = map.get("explanation").and_then(|v| v.as_str()).map(String::from);
+    f.action = map.get("action").and_then(|v| v.as_str()).map(String::from);
+    f.validity = map.get("validity").and_then(|v| v.as_str()).map(String::from);
+    f.comment = map.get("comment").and_then(|v| v.as_str()).map(String::from);
+    f.future_fix = map.get("future-fix").or_else(|| map.get("future_fix")).or_else(|| map.get("later-fix")).or_else(|| map.get("later_fix")).cloned();
+    f.fixed_by = map.get("fixed-by").or_else(|| map.get("fixed_by")).cloned();
+    f.in_upstream = map.get("in-upstream").or_else(|| map.get("in_upstream")).or_else(|| map.get("inherited-from-upstream")).or_else(|| map.get("inherited_from_upstream")).or_else(|| map.get("upstream-present")).or_else(|| map.get("present-in-upstream")).cloned();
+    Some(f)
+}
+
 fn parse_verified_finding_value(val: &serde_json::Value) -> Option<VerifiedFinding> {
     match val {
         serde_json::Value::Object(map) => {
@@ -201,9 +270,13 @@ fn parse_verified_finding_value(val: &serde_json::Value) -> Option<VerifiedFindi
                         merged.insert(k.clone(), v.clone());
                     }
                 }
-                serde_json::from_value::<VerifiedFinding>(serde_json::Value::Object(merged)).ok()
+                serde_json::from_value::<VerifiedFinding>(serde_json::Value::Object(merged.clone()))
+                    .ok()
+                    .or_else(|| parse_verified_finding_from_map(&merged))
             } else {
-                serde_json::from_value::<VerifiedFinding>(val.clone()).ok()
+                serde_json::from_value::<VerifiedFinding>(val.clone())
+                    .ok()
+                    .or_else(|| parse_verified_finding_from_map(map))
             }
         }
         _ => None,
@@ -392,7 +465,7 @@ impl VerifiedFinding {
     }
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Default)]
 pub struct VerifiedResult {
     #[serde(default)]
     pub commit: String,
@@ -506,6 +579,357 @@ pub struct VerifiedResult {
         alias = "later_fixes"
     )]
     pub later_fix_alt: Option<serde_json::Value>,
+
+    #[serde(skip)]
+    pub warnings: Vec<String>,
+}
+
+fn as_string(v: &serde_json::Value) -> Option<String> {
+    match v {
+        serde_json::Value::String(s) => Some(s.clone()),
+        serde_json::Value::Number(n) => Some(n.to_string()),
+        serde_json::Value::Bool(b) => Some(b.to_string()),
+        _ => None,
+    }
+}
+
+fn as_u32(v: &serde_json::Value) -> Option<u32> {
+    match v {
+        serde_json::Value::Number(n) => n.as_u64().map(|x| x as u32),
+        serde_json::Value::String(s) => s.trim().parse::<u32>().ok(),
+        _ => None,
+    }
+}
+
+fn as_bool(v: &serde_json::Value) -> Option<bool> {
+    match v {
+        serde_json::Value::Bool(b) => Some(*b),
+        serde_json::Value::String(s) => match s.trim().to_lowercase().as_str() {
+            "true" | "1" | "yes" => Some(true),
+            "false" | "0" | "no" => Some(false),
+            _ => None,
+        },
+        serde_json::Value::Number(n) => match n.as_u64() {
+            Some(1) => Some(true),
+            Some(0) => Some(false),
+            _ => None,
+        },
+        _ => None,
+    }
+}
+
+impl VerifiedResult {
+    pub fn from_entries(entries: Vec<(String, serde_json::Value)>) -> Self {
+        let mut res = VerifiedResult::default();
+        let mut key_counts: std::collections::HashMap<String, usize> = std::collections::HashMap::new();
+        let mut normalized_keys: std::collections::HashMap<String, Vec<String>> = std::collections::HashMap::new();
+
+        for (k, _) in &entries {
+            *key_counts.entry(k.clone()).or_insert(0) += 1;
+            let norm = k.replace('-', "_");
+            let list = normalized_keys.entry(norm).or_default();
+            if !list.contains(k) {
+                list.push(k.clone());
+            }
+        }
+
+        // 1. Detect exact duplicate keys in JSON
+        for (k, count) in &key_counts {
+            if *count > 1 {
+                res.warnings.push(format!("duplicate key '{}'", k));
+            }
+        }
+
+        // 2. Detect alias duplicates (different keys that normalize to the same name)
+        for list in normalized_keys.values() {
+            if list.len() > 1 {
+                let mut sorted = list.clone();
+                sorted.sort();
+                res.warnings.push(format!(
+                    "duplicate entry '{}' (as {})",
+                    sorted[0],
+                    sorted.iter().map(|s| format!("'{}'", s)).collect::<Vec<_>>().join(" and ")
+                ));
+            }
+        }
+
+        // 3. Detect duplicate semantic fields (e.g. date variants, summary variants)
+        let date_keys: Vec<&str> = entries
+            .iter()
+            .map(|(k, _)| k.as_str())
+            .filter(|k| {
+                *k == "re-verified-date"
+                    || *k == "re_verified_date"
+                    || *k == "re-verification-date"
+                    || *k == "re_verification_date"
+            })
+            .collect();
+        let mut unique_date_norms = std::collections::HashSet::new();
+        for dk in &date_keys {
+            unique_date_norms.insert(dk.replace('-', "_"));
+        }
+        if unique_date_norms.len() > 1 {
+            let mut sorted_dates: Vec<&str> = date_keys.clone();
+            sorted_dates.sort();
+            sorted_dates.dedup();
+            res.warnings.push(format!(
+                "duplicate date entries ({})",
+                sorted_dates.iter().map(|s| format!("'{}'", s)).collect::<Vec<_>>().join(" and ")
+            ));
+        }
+
+        let has_summary = entries.iter().any(|(k, v)| k == "summary" && !v.is_null());
+        let has_re_verif_summary = entries.iter().any(|(k, v)| {
+            (*k == "re-verification-summary"
+                || *k == "verification-summary"
+                || *k == "verification_summary"
+                || *k == "re_verification_summary")
+                && !v.is_null()
+        });
+        if has_summary && has_re_verif_summary {
+            res.warnings.push("duplicate entry 'summary' / 're-verification-summary'".to_string());
+        }
+
+        res.warnings.sort();
+        res.warnings.dedup();
+
+        for (key, value) in entries {
+            match key.as_str() {
+                "commit" => {
+                    if let Some(s) = as_string(&value) {
+                        res.commit = s;
+                    }
+                }
+                "model" => {
+                    if let Some(s) = as_string(&value) {
+                        res.model = s;
+                    }
+                }
+                "verifier-model" | "verifier_model" | "verifier" | "verified-by" | "verified_by" => {
+                    if let Some(s) = as_string(&value) {
+                        res.verifier_model = Some(s);
+                    }
+                }
+                "subject" => {
+                    if let Some(s) = as_string(&value) {
+                        res.subject = Some(s);
+                    }
+                }
+                "distro-commit" | "distro_commit" => {
+                    if let Some(s) = as_string(&value) {
+                        res.distro_commit = Some(s);
+                    }
+                }
+                "upstream-commit" | "upstream_commit" => {
+                    if let Some(s) = as_string(&value) {
+                        res.upstream_commit = Some(s);
+                    }
+                }
+                "re-verified-by" => {
+                    if let Some(s) = as_string(&value) {
+                        res.re_verified_by = Some(s);
+                    }
+                }
+                "re_verified_by" => {
+                    if let Some(s) = as_string(&value) {
+                        res.re_verified_by_alt = Some(s);
+                    }
+                }
+                "re-verified-date" => {
+                    if let Some(s) = as_string(&value) {
+                        res.re_verified_date = Some(s);
+                    }
+                }
+                "re_verified_date" => {
+                    if let Some(s) = as_string(&value) {
+                        res.re_verified_date_alt = Some(s);
+                    }
+                }
+                "re-verification-date" => {
+                    if let Some(s) = as_string(&value) {
+                        res.re_verification_date = Some(s);
+                    }
+                }
+                "re_verification_date" => {
+                    if let Some(s) = as_string(&value) {
+                        res.re_verification_date_alt = Some(s);
+                    }
+                }
+                "re-verification-summary" | "verification-summary" | "verification_summary" => {
+                    if let Some(s) = as_string(&value) {
+                        res.re_verification_summary = Some(s);
+                    }
+                }
+                "summary" => {
+                    if let Some(s) = as_string(&value) {
+                        res.summary = Some(s);
+                    }
+                }
+                "verdict" => {
+                    if let Some(s) = as_string(&value) {
+                        res.verdict = Some(s);
+                    }
+                }
+                "verified" => {
+                    if let Some(b) = as_bool(&value) {
+                        res.verified = Some(b);
+                    }
+                }
+                "issues-found" => {
+                    if let Some(n) = as_u32(&value) {
+                        res.issues_found = Some(n);
+                    }
+                }
+                "issues_found" => {
+                    if let Some(n) = as_u32(&value) {
+                        res.issues_found_alt = Some(n);
+                    }
+                }
+                "total-findings-before-verification"
+                | "total_findings_before_verification"
+                | "original-findings"
+                | "original_findings"
+                | "original-issues"
+                | "original_issues"
+                | "total-findings"
+                | "total_findings" => {
+                    if let Some(n) = as_u32(&value) {
+                        res.total_findings_before_verification = Some(n);
+                    }
+                }
+                "confirmed-findings" | "confirmed-issues" | "confirmed_issues" => {
+                    if let Some(n) = as_u32(&value) {
+                        if res.issues_confirmed.is_none() {
+                            res.issues_confirmed = Some(n);
+                        }
+                    }
+                    res.confirmed_findings_raw = Some(value);
+                }
+                "confirmed" => {
+                    if let Some(n) = as_u32(&value) {
+                        res.issues_confirmed = Some(n);
+                        if res.confirmed_raw.is_none() {
+                            res.confirmed_raw = Some(value);
+                        }
+                    } else if value.is_array() {
+                        if let Some(arr) = value.as_array() {
+                            if res.issues_confirmed.is_none() {
+                                res.issues_confirmed = Some(arr.len() as u32);
+                            }
+                        }
+                        res.confirmed_raw = Some(value);
+                    } else {
+                        res.confirmed_raw = Some(value);
+                    }
+                }
+                "issues-confirmed" | "issues_confirmed" | "valid-issues" | "valid_issues" => {
+                    if let Some(n) = as_u32(&value) {
+                        res.issues_confirmed = Some(n);
+                    }
+                }
+                "pruned-findings-count"
+                | "issues-pruned"
+                | "issues_pruned"
+                | "pruned-count"
+                | "pruned_count" => {
+                    if let Some(n) = as_u32(&value) {
+                        res.pruned_findings_count = Some(n);
+                    }
+                }
+                "pruned-findings" => {
+                    res.pruned_findings_raw = Some(value);
+                }
+                "pruned_entries" => {
+                    res.pruned_entries_raw = Some(value);
+                }
+                "pruned" => {
+                    if let Some(n) = as_u32(&value) {
+                        res.pruned_findings_count = Some(n);
+                        if res.pruned_raw.is_none() {
+                            res.pruned_raw = Some(value);
+                        }
+                    } else if value.is_array() {
+                        if let Some(arr) = value.as_array() {
+                            if res.pruned_findings_count.is_none() {
+                                res.pruned_findings_count = Some(arr.len() as u32);
+                            }
+                        }
+                        res.pruned_raw = Some(value);
+                    } else {
+                        res.pruned_raw = Some(value);
+                    }
+                }
+                "findings" | "verified-findings" => {
+                    if let Some(arr) = value.as_array() {
+                        let parsed: Vec<VerifiedFinding> = arr
+                            .iter()
+                            .filter_map(parse_verified_finding_value)
+                            .collect();
+                        if !parsed.is_empty() || res.findings.is_empty() {
+                            res.findings = parsed;
+                        }
+                    }
+                }
+                "findings-evaluation" => {
+                    if let Some(arr) = value.as_array() {
+                        let parsed: Vec<VerifiedFinding> = arr
+                            .iter()
+                            .filter_map(parse_verified_finding_value)
+                            .collect();
+                        if !parsed.is_empty() || res.findings_evaluation.is_empty() {
+                            res.findings_evaluation = parsed;
+                        }
+                    }
+                }
+                "results" => {
+                    if let Some(arr) = value.as_array() {
+                        res.results = arr.clone();
+                    }
+                }
+                "verifications" => {
+                    if let Some(arr) = value.as_array() {
+                        res.verifications = arr.clone();
+                    }
+                }
+                "later-fix" | "future_fix_notes" | "later_fix" | "later-fixes" | "later_fixes" => {
+                    res.later_fix = Some(value);
+                }
+                _ => {}
+            }
+        }
+        res
+    }
+}
+
+impl<'de> serde::Deserialize<'de> for VerifiedResult {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        struct VerifiedResultVisitor;
+
+        impl<'de> serde::de::Visitor<'de> for VerifiedResultVisitor {
+            type Value = VerifiedResult;
+
+            fn expecting(&self, formatter: &mut std::fmt::Formatter) -> std::fmt::Result {
+                formatter.write_str("a verified result object")
+            }
+
+            fn visit_map<M>(self, mut access: M) -> Result<Self::Value, M::Error>
+            where
+                M: serde::de::MapAccess<'de>,
+            {
+                let mut entries = Vec::new();
+                while let Some(key) = access.next_key::<String>()? {
+                    let val = access.next_value::<serde_json::Value>()?;
+                    entries.push((key, val));
+                }
+                Ok(VerifiedResult::from_entries(entries))
+            }
+        }
+
+        deserializer.deserialize_map(VerifiedResultVisitor)
+    }
 }
 
 impl VerifiedResult {
@@ -607,6 +1031,13 @@ impl VerifiedResult {
 
     pub fn render_with_width(&self, width: usize) -> String {
         let mut out = String::new();
+        if !self.warnings.is_empty() {
+            out.push_str("=== Warnings ===\n");
+            for w in &self.warnings {
+                out.push_str(&format!("* {}\n", w));
+            }
+            out.push('\n');
+        }
         if !self.commit.is_empty() {
             out.push_str(&format!("commit {}\n", self.commit));
         }
@@ -1375,7 +1806,12 @@ mod tests {
                         *checked += 1;
                         let content = std::fs::read_to_string(&path).unwrap();
                         match serde_json::from_str::<VerifiedResult>(&content) {
-                            Ok(_) => {}
+                            Ok(verified) => {
+                                let _ = verified.findings();
+                                let _ = verified.confirmed_findings();
+                                let _ = verified.pruned_findings_count();
+                                let _ = verified.render_with_width(80);
+                            }
                             Err(e) => {
                                 errors.push(format!("{}: {}", path.display(), e));
                             }
@@ -1532,5 +1968,105 @@ mod tests {
         let rendered = verified.render_with_width(80);
         assert!(rendered.contains("Upstream-note:\nThe same bug is present in upstream commit 75fb63ae0312"));
         assert!(rendered.contains("path_reachable: rockchip_grf_init() is __init"));
+    }
+
+    #[test]
+    fn test_verified_result_duplicate_keys_and_aliases() {
+        let json_data = r#"{
+          "commit": "0c7674d3d65a1b2b178e8f66495e79b048aee834",
+          "model": "qwen3.8-27b",
+          "subject": "scsi: qla2xxx: Use QP lock to search for bsg",
+          "distro-commit": "0a579d00004251aaa0344329b5f12478b5bc473f",
+          "upstream-commit": "c449b4198701d828e40d60a2abd30970b74a1d75",
+          "re-verified-by": "Gemini CLI",
+          "re_verified_by": "Gemini CLI",
+          "re-verified-date": "Wednesday, October 14, 2026",
+          "re_verification_date": "2026-10-14",
+          "summary": "Re-verification of downstream commit",
+          "re-verification-summary": "Re-verification of downstream commit",
+          "issues-found": 1,
+          "issues_found": 1,
+          "total-findings": 1,
+          "confirmed": 1,
+          "pruned": 0,
+          "findings": [
+            {
+              "category": "CHANGE-4",
+              "type": "resource-leak",
+              "severity": "medium",
+              "confidence": 0.95,
+              "message": "Resource leak on error path",
+              "verdict": "confirmed"
+            }
+          ],
+          "confirmed": [
+            {
+              "category": "CHANGE-4",
+              "type": "resource-leak",
+              "severity": "medium",
+              "confidence": 0.95,
+              "message": "Resource leak on error path",
+              "verdict": "confirmed"
+            }
+          ],
+          "pruned": []
+        }"#;
+
+        let verified: VerifiedResult =
+            serde_json::from_str(json_data).expect("Should deserialize tolerant of duplicates");
+        assert_eq!(verified.commit, "0c7674d3d65a1b2b178e8f66495e79b048aee834");
+        assert_eq!(verified.model, "qwen3.8-27b");
+        assert_eq!(verified.confirmed_findings(), Some(1));
+        assert_eq!(verified.pruned_findings_count(), Some(0));
+        assert_eq!(verified.issues_found(), Some(1));
+        assert_eq!(verified.findings().len(), 1);
+
+        assert!(!verified.warnings.is_empty());
+        assert!(verified
+            .warnings
+            .iter()
+            .any(|w| w.contains("duplicate key 'confirmed'")));
+        assert!(verified
+            .warnings
+            .iter()
+            .any(|w| w.contains("duplicate key 'pruned'")));
+        assert!(verified.warnings.iter().any(|w| w.contains("issues-found")));
+        assert!(verified.warnings.iter().any(|w| w.contains("re-verified-by")));
+
+        let rendered = verified.render_with_width(80);
+        assert!(rendered.contains("=== Warnings ==="));
+        assert!(rendered.contains("duplicate key 'confirmed'"));
+        assert!(rendered.contains("commit 0c7674d3d65a1b2b178e8f66495e79b048aee834"));
+        assert!(rendered.contains("=== Finding 1 ==="));
+    }
+
+    #[test]
+    fn test_user_reported_commit_0c7674d3d65a() {
+        let path = std::path::Path::new(
+            "/home/tiwai/tmp/kreviews/db/qwen3.8-27b/0c/0c7674d3d65a1b2b178e8f66495e79b048aee834/verified-result.json",
+        );
+        if !path.exists() {
+            return;
+        }
+        let content = std::fs::read_to_string(path).unwrap();
+        let verified: VerifiedResult = serde_json::from_str(&content)
+            .expect("Must parse commit 0c7674d3d65a tolerant of duplicate keys");
+        assert_eq!(verified.commit, "0c7674d3d65a1b2b178e8f66495e79b048aee834");
+        assert_eq!(verified.confirmed_findings(), Some(1));
+        assert_eq!(verified.pruned_findings_count(), Some(0));
+        assert_eq!(verified.findings().len(), 1);
+        assert!(!verified.warnings.is_empty());
+        assert!(verified
+            .warnings
+            .iter()
+            .any(|w| w.contains("duplicate key 'confirmed'")));
+        assert!(verified
+            .warnings
+            .iter()
+            .any(|w| w.contains("duplicate key 'pruned'")));
+
+        let rendered = verified.render_with_width(80);
+        assert!(rendered.contains("=== Warnings ==="));
+        assert!(rendered.contains("commit 0c7674d3d65a1b2b178e8f66495e79b048aee834"));
     }
 }

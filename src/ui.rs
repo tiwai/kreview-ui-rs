@@ -1406,23 +1406,34 @@ impl TuiApp {
         else {
             return;
         };
-        let verified = match serde_json::from_str::<VerifiedResult>(&json_str) {
-            Ok(v) => v,
-            Err(e) => {
-                self.status_message = Some((
-                    format!("Failed to parse verified-result.json: {}", e),
-                    Instant::now(),
-                ));
-                return;
-            }
-        };
+        let verified_res = serde_json::from_str::<VerifiedResult>(&json_str);
 
         let width = if let Ok((cols, _)) = crossterm::terminal::size() {
             (cols.saturating_sub(2) as usize).max(40)
         } else {
             80
         };
-        let content = verified.render_with_width(width);
+
+        let (content, warnings) = match verified_res {
+            Ok(verified) => {
+                let warnings = verified.warnings.clone();
+                (verified.render_with_width(width), warnings)
+            }
+            Err(e) => {
+                let content = format!(
+                    "=== Warning: Failed to parse verified-result.json ===\nError: {}\n\n=== Raw Content ===\n{}",
+                    e, json_str
+                );
+                (content, vec![format!("Failed to parse JSON: {}", e)])
+            }
+        };
+
+        if !warnings.is_empty() {
+            self.status_message = Some((
+                format!("Warning: {}", warnings.join(", ")),
+                Instant::now(),
+            ));
+        }
 
         let models_map = self.state.db.load_models();
         let name = models_map
@@ -2227,6 +2238,13 @@ impl TuiApp {
                                     .add_modifier(Modifier::BOLD),
                             ),
                         ]));
+                    } else if line.starts_with("* duplicate ") || line.starts_with("=== Warnings ===") {
+                        text_lines.push(Line::from(Span::styled(
+                            line.as_str().to_string(),
+                            Style::default()
+                                .fg(theme.sev_med)
+                                .add_modifier(Modifier::BOLD),
+                        )));
                     } else if line.starts_with("=== ") && line.ends_with(" ===") {
                         text_lines.push(Line::from(Span::styled(
                             line.as_str().to_string(),
@@ -3488,5 +3506,167 @@ mod tests {
         );
 
         assert!(!cv_state.is_downstream_view);
+    }
+
+    #[test]
+    fn test_action_show_verified_result_duplicate_keys_and_warning() {
+        let temp_dir = std::env::temp_dir().join(format!(
+            "kreview_test_dup_{}",
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        let db_path = temp_dir.clone();
+        let model_dir = db_path
+            .join("test-model")
+            .join("0c")
+            .join("0c7674d3d65a1b2b178e8f66495e79b048aee834");
+        std::fs::create_dir_all(&model_dir).unwrap();
+
+        let json_content = r#"{
+          "commit": "0c7674d3d65a1b2b178e8f66495e79b048aee834",
+          "model": "test-model",
+          "issues-found": 1,
+          "issues_found": 1,
+          "confirmed": 1,
+          "confirmed": [
+            {
+              "type": "resource-leak",
+              "verdict": "confirmed",
+              "comment": "leak found"
+            }
+          ],
+          "pruned": 0,
+          "pruned": []
+        }"#;
+        std::fs::write(model_dir.join("verified-result.json"), json_content).unwrap();
+
+        let mut config = Config::default();
+        config.database_path = db_path;
+        let state = AppState::new(config);
+
+        let mut reviews = HashMap::new();
+        let metadata = ReviewMetadata {
+            author: "Author".to_string(),
+            subject: "test subject".to_string(),
+            issues_found: 1,
+            issue_severity_score: Severity::Medium,
+            issue_severity_explanation: String::new(),
+            sha: "0c7674d3d65a1b2b178e8f66495e79b048aee834".to_string(),
+            model: "test-model".to_string(),
+            review_time_seconds: 0.0,
+            input_tokens: 0,
+            output_tokens: 0,
+            total_tokens: 0,
+            suse_commit: None,
+            upstream_commit: None,
+            has_pre_verification: false,
+            has_verified_result: true,
+            findings_downstream_only: 0,
+            has_fix_patches: false,
+        };
+        reviews.insert("test-model".to_string(), metadata);
+
+        let commit = CommitReview {
+            sha: "0c7674d3d65a1b2b178e8f66495e79b048aee834".to_string(),
+            subject: "test subject".to_string(),
+            author: "Author".to_string(),
+            committer: "Committer".to_string(),
+            suse_commit: None,
+            upstream_commit: None,
+            reviews,
+            status: Status::Unread,
+        };
+
+        let mut app = TuiApp::new(state);
+        app.action_show_verified_result(&commit, "test-model");
+
+        if let ActiveScreen::ContentViewer(s) = &app.active_screen {
+            assert!(s.content.contains("=== Warnings ==="));
+            assert!(s.content.contains("duplicate key 'confirmed'"));
+            assert!(s.content.contains("duplicate key 'pruned'"));
+            assert!(s.content.contains("leak found"));
+        } else {
+            panic!("Expected ContentViewer screen to be active");
+        }
+
+        assert!(app.status_message.is_some());
+        let (msg, _) = app.status_message.unwrap();
+        assert!(msg.contains("Warning:"));
+        assert!(msg.contains("duplicate key 'confirmed'"));
+
+        let _ = std::fs::remove_dir_all(&temp_dir);
+    }
+
+    #[test]
+    fn test_action_show_verified_result_malformed_json_fallback() {
+        let temp_dir = std::env::temp_dir().join(format!(
+            "kreview_test_malformed_{}",
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        let db_path = temp_dir.clone();
+        let model_dir = db_path
+            .join("test-model")
+            .join("11")
+            .join("1111111111111111111111111111111111111111");
+        std::fs::create_dir_all(&model_dir).unwrap();
+
+        let json_content = "{ broken json: ";
+        std::fs::write(model_dir.join("verified-result.json"), json_content).unwrap();
+
+        let mut config = Config::default();
+        config.database_path = db_path;
+        let state = AppState::new(config);
+
+        let mut reviews = HashMap::new();
+        let metadata = ReviewMetadata {
+            author: "Author".to_string(),
+            subject: "test subject".to_string(),
+            issues_found: 1,
+            issue_severity_score: Severity::Medium,
+            issue_severity_explanation: String::new(),
+            sha: "1111111111111111111111111111111111111111".to_string(),
+            model: "test-model".to_string(),
+            review_time_seconds: 0.0,
+            input_tokens: 0,
+            output_tokens: 0,
+            total_tokens: 0,
+            suse_commit: None,
+            upstream_commit: None,
+            has_pre_verification: false,
+            has_verified_result: true,
+            findings_downstream_only: 0,
+            has_fix_patches: false,
+        };
+        reviews.insert("test-model".to_string(), metadata);
+
+        let commit = CommitReview {
+            sha: "1111111111111111111111111111111111111111".to_string(),
+            subject: "test subject".to_string(),
+            author: "Author".to_string(),
+            committer: "Committer".to_string(),
+            suse_commit: None,
+            upstream_commit: None,
+            reviews,
+            status: Status::Unread,
+        };
+
+        let mut app = TuiApp::new(state);
+        app.action_show_verified_result(&commit, "test-model");
+
+        if let ActiveScreen::ContentViewer(s) = &app.active_screen {
+            assert!(s.content.contains("=== Warning: Failed to parse verified-result.json ==="));
+            assert!(s.content.contains("{ broken json: "));
+        } else {
+            panic!("Expected ContentViewer screen to be active even on parse failure");
+        }
+
+        assert!(app.status_message.is_some());
+
+        let _ = std::fs::remove_dir_all(&temp_dir);
     }
 }
