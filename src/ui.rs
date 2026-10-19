@@ -1105,7 +1105,9 @@ impl TuiApp {
                         "-".to_string()
                     };
                     let downstream_only = review.findings_downstream_only.to_string();
-                    let severity = if review.issue_severity_score != Severity::None {
+                    let severity = if review.issues_found > 0
+                        && review.issue_severity_score != Severity::None
+                    {
                         review.issue_severity_score.as_str().to_uppercase()
                     } else {
                         "-".to_string()
@@ -1936,7 +1938,7 @@ impl TuiApp {
         }
 
         // Severity
-        if review.issue_severity_score != Severity::None {
+        if review.issues_found > 0 && review.issue_severity_score != Severity::None {
             let sev_str = match review.issue_severity_score {
                 Severity::None => "",
                 Severity::Low => "L",
@@ -3418,6 +3420,36 @@ mod tests {
         assert!(!line_selected.spans.is_empty());
         let first_span_selected = &line_selected.spans[0];
         assert_eq!(first_span_selected.style.bg, Some(theme.selected_bg));
+
+        // 3. Zero issues with stale Severity::High: should NOT display "H"
+        let review_zero_issues_stale_high = ReviewMetadata {
+            author: "Author A".to_string(),
+            subject: "Commit 2".to_string(),
+            issues_found: 0,
+            issue_severity_score: Severity::High,
+            issue_severity_explanation: "Stale explanation".to_string(),
+            sha: "2222222222222222222222222222222222222222".to_string(),
+            model: "model_1".to_string(),
+            review_time_seconds: 1.0,
+            input_tokens: 1,
+            output_tokens: 1,
+            total_tokens: 2,
+            suse_commit: None,
+            upstream_commit: None,
+            has_pre_verification: false,
+            has_verified_result: true,
+            findings_downstream_only: 0,
+            has_fix_patches: false,
+        };
+        let line_zero = TuiApp::format_review_cell(
+            &review_zero_issues_stale_high,
+            false,
+            false,
+            false,
+            &theme,
+        );
+        let span_texts: Vec<String> = line_zero.spans.iter().map(|s| s.content.to_string()).collect();
+        assert!(!span_texts.iter().any(|t| t == "H"), "Cell should not render 'H' when issues_found == 0");
     }
 
     #[test]

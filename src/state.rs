@@ -189,7 +189,7 @@ impl AppState {
             filtered.retain(|c| {
                 self.visible_models.iter().any(|model_id| {
                     if let Some(r) = c.reviews.get(model_id) {
-                        r.issue_severity_score >= *min_severity
+                        r.issues_found > 0 && r.issue_severity_score >= *min_severity
                     } else {
                         false
                     }
@@ -460,6 +460,59 @@ mod tests {
             state.filtered_commits.len(),
             1,
             "Commit should be retained because the high-severity model is visible."
+        );
+    }
+
+    #[test]
+    fn test_severity_filtering_zero_issues_with_stale_severity() {
+        let mut config = Config::default();
+        config.database_path = std::path::PathBuf::from("nonexistent_db_path");
+        let mut state = AppState::new(config);
+
+        let mut reviews = HashMap::new();
+        reviews.insert(
+            "qwen3.8-27b".to_string(),
+            ReviewMetadata {
+                author: "test author".to_string(),
+                subject: "test subject".to_string(),
+                issues_found: 0,
+                // Even if severity was not normalized and stayed High:
+                issue_severity_score: Severity::High,
+                issue_severity_explanation: "Stale high explanation".to_string(),
+                sha: "e28aaf225408".to_string(),
+                model: "qwen3.8-27b".to_string(),
+                review_time_seconds: 0.0,
+                input_tokens: 0,
+                output_tokens: 0,
+                total_tokens: 0,
+                suse_commit: None,
+                upstream_commit: None,
+                has_pre_verification: false,
+                has_verified_result: true,
+                findings_downstream_only: 0,
+                has_fix_patches: false,
+            },
+        );
+
+        let commit = CommitReview {
+            sha: "e28aaf225408".to_string(),
+            subject: "test subject".to_string(),
+            author: "test author".to_string(),
+            committer: "test author".to_string(),
+            suse_commit: None,
+            upstream_commit: None,
+            status: Status::Unread,
+            reviews,
+        };
+
+        state.commits = vec![commit];
+        state.visible_models = vec!["qwen3.8-27b".to_string()];
+        state.severity_filter = Some(Severity::Low);
+
+        state.apply_filters();
+        assert!(
+            state.filtered_commits.is_empty(),
+            "Commit with 0 issues should be filtered out by severity filter even if issue_severity_score was high"
         );
     }
 

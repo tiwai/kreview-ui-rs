@@ -129,6 +129,9 @@ impl ReviewDatabase {
         // Correct/fill model ID if missing or different
         metadata.model = model_id.to_string();
 
+        // Enforce internal consistency (e.g. issues_found == 0 => Severity::None)
+        metadata.normalize();
+
         // Check for optional files
         metadata.has_pre_verification = review_dir.join("review-pre-verification.json").exists();
         metadata.has_verified_result = review_dir.join("verified-result.json").exists();
@@ -203,3 +206,28 @@ impl ReviewDatabase {
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::models::Severity;
+
+    #[test]
+    fn test_load_review_user_reported_commit_e28aaf225408() {
+        let db_path = std::path::PathBuf::from("/home/tiwai/tmp/kreviews/db");
+        if !db_path.exists() {
+            return;
+        }
+        let db = ReviewDatabase::new(db_path);
+        let rev = db
+            .load_review("qwen3.8-27b", "e28aaf2254081dadc41dee2bc1f552273747c0aa")
+            .expect("Must load review for e28aaf225408");
+        assert_eq!(rev.issues_found, 0);
+        assert_eq!(
+            rev.issue_severity_score,
+            Severity::None,
+            "Severity must be normalized to None when issues_found is 0"
+        );
+    }
+}
+

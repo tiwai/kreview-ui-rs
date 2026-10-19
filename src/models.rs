@@ -43,9 +43,17 @@ impl Status {
 pub struct ReviewMetadata {
     pub author: String,
     pub subject: String,
-    #[serde(rename = "issues-found", default)]
+    #[serde(
+        rename = "issues-found",
+        default,
+        deserialize_with = "deserialize_issues_found"
+    )]
     pub issues_found: u32,
-    #[serde(rename = "issue-severity-score", default = "default_severity")]
+    #[serde(
+        rename = "issue-severity-score",
+        default = "default_severity",
+        deserialize_with = "deserialize_severity_lenient"
+    )]
     pub issue_severity_score: Severity,
     #[serde(rename = "issue-severity-explanation", default)]
     pub issue_severity_explanation: String,
@@ -73,6 +81,49 @@ pub struct ReviewMetadata {
     pub findings_downstream_only: u32,
     #[serde(skip)]
     pub has_fix_patches: bool,
+}
+
+impl ReviewMetadata {
+    /// Normalizes metadata fields to enforce internal consistency.
+    /// If no issues were found, severity is guaranteed to be Severity::None.
+    pub fn normalize(&mut self) {
+        if self.issues_found == 0 {
+            self.issue_severity_score = Severity::None;
+        }
+    }
+}
+
+fn deserialize_issues_found<'de, D>(deserializer: D) -> Result<u32, D::Error>
+where
+    D: serde::Deserializer<'de>,
+{
+    let opt = Option::<serde_json::Value>::deserialize(deserializer)?;
+    match opt {
+        Some(serde_json::Value::Number(n)) => Ok(n.as_u64().unwrap_or(0) as u32),
+        Some(serde_json::Value::Bool(b)) => Ok(if b { 1 } else { 0 }),
+        Some(serde_json::Value::String(s)) => match s.trim().to_lowercase().as_str() {
+            "true" => Ok(1),
+            "false" => Ok(0),
+            other => Ok(other.parse::<u32>().unwrap_or(0)),
+        },
+        _ => Ok(0),
+    }
+}
+
+fn deserialize_severity_lenient<'de, D>(deserializer: D) -> Result<Severity, D::Error>
+where
+    D: serde::Deserializer<'de>,
+{
+    let opt = Option::<serde_json::Value>::deserialize(deserializer)?;
+    match opt {
+        Some(serde_json::Value::String(s)) => match s.trim().to_lowercase().as_str() {
+            "low" => Ok(Severity::Low),
+            "medium" | "med" => Ok(Severity::Medium),
+            "high" => Ok(Severity::High),
+            _ => Ok(Severity::None),
+        },
+        _ => Ok(Severity::None),
+    }
 }
 
 fn default_severity() -> Severity {
@@ -1577,6 +1628,64 @@ mod tests {
 
         assert_eq!(meta_suse.suse_commit, Some("abcdef".to_string()));
         assert_eq!(meta_distro.suse_commit, Some("abcdef".to_string()));
+
+        // Edge case: issues-found as boolean false (seen in gemma-4/8f33856d35e9)
+        let json_bool_false = r#"{
+            "author": "Alice",
+            "subject": "Some fix",
+            "sha": "123456",
+            "model": "model_1",
+            "issues-found": false,
+            "issue-severity-score": "high"
+        }"#;
+        let mut meta_bool: ReviewMetadata = serde_json::from_str(json_bool_false).unwrap();
+        assert_eq!(meta_bool.issues_found, 0);
+        assert_eq!(meta_bool.issue_severity_score, Severity::High);
+        meta_bool.normalize();
+        assert_eq!(meta_bool.issue_severity_score, Severity::None);
+
+        // Edge case: issue-severity-score as "info" (seen in qwen3.6/0e54d8a0b6e8)
+        let json_info = r#"{
+            "author": "Alice",
+            "subject": "Some fix",
+            "sha": "123456",
+            "model": "model_1",
+            "issues-found": 0,
+            "issue-severity-score": "info"
+        }"#;
+        let mut meta_info: ReviewMetadata = serde_json::from_str(json_info).unwrap();
+        assert_eq!(meta_info.issues_found, 0);
+        assert_eq!(meta_info.issue_severity_score, Severity::None);
+        meta_info.normalize();
+        assert_eq!(meta_info.issue_severity_score, Severity::None);
+
+        // Edge case: issue-severity-score as null or missing
+        let json_null_sev = r#"{
+            "author": "Alice",
+            "subject": "Some fix",
+            "sha": "123456",
+            "model": "model_1",
+            "issues-found": 2,
+            "issue-severity-score": null
+        }"#;
+        let meta_null: ReviewMetadata = serde_json::from_str(json_null_sev).unwrap();
+        assert_eq!(meta_null.issues_found, 2);
+        assert_eq!(meta_null.issue_severity_score, Severity::None);
+
+        // Normalization: issues-found 0 with "high" severity resets to Severity::None
+        let json_zero_high = r#"{
+            "author": "Ivan T. Ivanov <iivanov@suse.de>",
+            "subject": "arm64: errata: Factor out broken AMU const counter cap",
+            "issues-found": 0,
+            "issue-severity-score": "high",
+            "sha": "e28aaf2254081dadc41dee2bc1f552273747c0aa",
+            "model": "qwen3.8-27b"
+        }"#;
+        let mut meta_zero_high: ReviewMetadata = serde_json::from_str(json_zero_high).unwrap();
+        assert_eq!(meta_zero_high.issues_found, 0);
+        assert_eq!(meta_zero_high.issue_severity_score, Severity::High);
+        meta_zero_high.normalize();
+        assert_eq!(meta_zero_high.issue_severity_score, Severity::None);
     }
 
     #[test]
@@ -2152,4 +2261,72 @@ mod tests {
         assert_eq!(wrap_code(sample, 5), "abc\n→ def");
         assert_eq!(wrap_code(sample, 6), "abc →\ndef");
     }
+
+    #[test]
+    fn test_user_reported_commit_e28aaf225408() {
+        let dir = std::path::Path::new(
+            "/home/tiwai/tmp/kreviews/db/qwen3.8-27b/e2/e28aaf2254081dadc41dee2bc1f552273747c0aa",
+        );
+        if !dir.exists() {
+            return;
+        }
+        let meta_path = dir.join("review-metadata.json");
+        let content = std::fs::read_to_string(&meta_path).unwrap();
+        let mut meta: ReviewMetadata =
+            serde_json::from_str(&content).expect("Must parse review-metadata.json for commit e28aaf225408");
+        assert_eq!(meta.issues_found, 0);
+        assert_eq!(meta.issue_severity_score, Severity::High);
+        meta.normalize();
+        assert_eq!(meta.issue_severity_score, Severity::None);
+    }
+
+    #[test]
+    fn test_diagnose_db_metadata_json() {
+        let db_path = std::path::Path::new("/home/tiwai/tmp/kreviews/db");
+        if !db_path.exists() {
+            return;
+        }
+        let mut checked = 0;
+        let mut errors = Vec::new();
+        fn visit_dirs(dir: &std::path::Path, checked: &mut usize, errors: &mut Vec<String>) {
+            if dir.is_dir() {
+                for entry in std::fs::read_dir(dir).unwrap() {
+                    let entry = entry.unwrap();
+                    let path = entry.path();
+                    if path.is_dir() {
+                        visit_dirs(&path, checked, errors);
+                    } else if path.is_file() && path.file_name().unwrap() == "review-metadata.json" {
+                        *checked += 1;
+                        let content = std::fs::read_to_string(&path).unwrap();
+                        match serde_json::from_str::<ReviewMetadata>(&content) {
+                            Ok(mut meta) => {
+                                meta.normalize();
+                                if meta.issues_found == 0 {
+                                    assert_eq!(
+                                        meta.issue_severity_score,
+                                        Severity::None,
+                                        "File {} has issues_found == 0 but severity != None after normalize",
+                                        path.display()
+                                    );
+                                }
+                            }
+                            Err(e) => {
+                                errors.push(format!("{}: {}", path.display(), e));
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        visit_dirs(db_path, &mut checked, &mut errors);
+        if !errors.is_empty() {
+            panic!(
+                "Checked {} files, failed {} files:\n{}",
+                checked,
+                errors.len(),
+                errors.join("\n")
+            );
+        }
+    }
 }
+
