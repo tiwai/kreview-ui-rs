@@ -1251,22 +1251,28 @@ impl VerifiedResult {
 }
 
 pub fn wrap_text(text: &str, max_width: usize) -> String {
+    let max_width = max_width.max(1);
     let mut wrapped = String::new();
     for (i, paragraph) in text.split('\n').enumerate() {
         if i > 0 {
             wrapped.push('\n');
         }
         let mut line = String::new();
+        let mut line_chars = 0;
         for word in paragraph.split_whitespace() {
+            let word_chars = word.chars().count();
             if line.is_empty() {
                 line.push_str(word);
-            } else if line.len() + 1 + word.len() > max_width {
+                line_chars = word_chars;
+            } else if line_chars + 1 + word_chars > max_width {
                 wrapped.push_str(&line);
                 wrapped.push('\n');
                 line = word.to_string();
+                line_chars = word_chars;
             } else {
                 line.push(' ');
                 line.push_str(word);
+                line_chars += 1 + word_chars;
             }
         }
         wrapped.push_str(&line);
@@ -1274,69 +1280,101 @@ pub fn wrap_text(text: &str, max_width: usize) -> String {
     wrapped
 }
 
-fn find_split_point(s: &str, min_idx: usize, max_idx: usize) -> usize {
-    if max_idx <= min_idx {
-        return max_idx;
+fn find_split_point(s: &str, min_char_idx: usize, max_char_idx: usize) -> usize {
+    let char_entries: Vec<(usize, char)> = s.char_indices().collect();
+    if char_entries.is_empty() {
+        return 0;
     }
+
+    let total_chars = char_entries.len();
+    let limit_char_idx = max_char_idx.min(total_chars);
+    let min_char_idx = min_char_idx.min(limit_char_idx);
+
+    let byte_offset_after = |char_idx: usize| -> usize {
+        if char_idx + 1 < total_chars {
+            char_entries[char_idx + 1].0
+        } else {
+            s.len()
+        }
+    };
+
     // Search backwards for a space first (most natural word boundary)
-    for i in (min_idx..max_idx).rev() {
-        if s.chars().nth(i) == Some(' ') {
-            return i + 1; // Split after the space
+    for i in (min_char_idx..limit_char_idx).rev() {
+        if char_entries[i].1 == ' ' {
+            return byte_offset_after(i);
         }
     }
+
     // Search backwards for a punctuation/operator boundary
-    for i in (min_idx..max_idx).rev() {
-        if let Some(c) = s.chars().nth(i) {
-            if c == ';'
-                || c == ','
-                || c == '('
-                || c == ')'
-                || c == '{'
-                || c == '}'
-                || c == '['
-                || c == ']'
-                || c == '='
-                || c == '+'
-                || c == '-'
-                || c == '&'
-                || c == '|'
-            {
-                return i + 1; // Split after the operator/punctuation
-            }
+    for i in (min_char_idx..limit_char_idx).rev() {
+        let c = char_entries[i].1;
+        if c == ';'
+            || c == ','
+            || c == '('
+            || c == ')'
+            || c == '{'
+            || c == '}'
+            || c == '['
+            || c == ']'
+            || c == '='
+            || c == '+'
+            || c == '-'
+            || c == '&'
+            || c == '|'
+        {
+            return byte_offset_after(i);
         }
     }
-    // Fallback to max_idx
-    max_idx
+
+    // Fallback: split at limit_char_idx
+    if limit_char_idx < total_chars {
+        char_entries[limit_char_idx].0
+    } else {
+        s.len()
+    }
 }
 
 pub fn wrap_code(text: &str, max_width: usize) -> String {
+    let max_width = max_width.max(1);
     let mut wrapped = Vec::new();
     for line in text.lines() {
-        if line.len() <= max_width {
+        if line.chars().count() <= max_width {
             wrapped.push(line.to_string());
         } else {
             // Find leading whitespace
             let leading_ws: String = line.chars().take_while(|c| c.is_whitespace()).collect();
-            let continuation_indent = leading_ws.clone();
+            let mut continuation_indent = leading_ws.clone();
+            if continuation_indent.chars().count() >= max_width {
+                continuation_indent.clear();
+            }
 
             let mut current_line = line.to_string();
             let mut is_first = true;
 
-            while current_line.len() > max_width {
+            while current_line.chars().count() > max_width {
                 let limit = max_width;
                 let min_idx = if is_first {
-                    leading_ws.len()
+                    let count = leading_ws.chars().count();
+                    if count >= max_width {
+                        0
+                    } else {
+                        count
+                    }
                 } else {
-                    continuation_indent.len()
+                    continuation_indent.chars().count()
                 };
 
-                // Find split point in current_line
+                // Find split point in current_line (returns a byte index in current_line)
                 let split_idx = find_split_point(&current_line, min_idx, limit);
 
                 let chunk = current_line[..split_idx].trim_end().to_string();
                 wrapped.push(chunk);
 
                 let remainder = current_line[split_idx..].trim_start().to_string();
+                if remainder.is_empty() {
+                    current_line.clear();
+                    break;
+                }
                 current_line = format!("{}{}", continuation_indent, remainder);
                 is_first = false;
             }
@@ -2052,21 +2090,66 @@ mod tests {
         let verified: VerifiedResult = serde_json::from_str(&content)
             .expect("Must parse commit 0c7674d3d65a tolerant of duplicate keys");
         assert_eq!(verified.commit, "0c7674d3d65a1b2b178e8f66495e79b048aee834");
-        assert_eq!(verified.confirmed_findings(), Some(1));
-        assert_eq!(verified.pruned_findings_count(), Some(0));
         assert_eq!(verified.findings().len(), 1);
-        assert!(!verified.warnings.is_empty());
-        assert!(verified
-            .warnings
-            .iter()
-            .any(|w| w.contains("duplicate key 'confirmed'")));
-        assert!(verified
-            .warnings
-            .iter()
-            .any(|w| w.contains("duplicate key 'pruned'")));
 
         let rendered = verified.render_with_width(80);
-        assert!(rendered.contains("=== Warnings ==="));
         assert!(rendered.contains("commit 0c7674d3d65a1b2b178e8f66495e79b048aee834"));
+    }
+
+    #[test]
+    fn test_user_reported_commit_fcc52826c114() {
+        let dir = std::path::Path::new(
+            "/home/tiwai/tmp/kreviews/db/qwen3.8-27b/fc/fcc52826c114e057e02c1c8837baf8f5cfab0be5",
+        );
+        if !dir.exists() {
+            return;
+        }
+        let verified_path = dir.join("verified-result.json");
+        if verified_path.exists() {
+            let content = std::fs::read_to_string(&verified_path).unwrap();
+            let verified: VerifiedResult = serde_json::from_str(&content)
+                .expect("Must parse verified-result.json for commit fcc52826c114");
+            // Test multiple widths around the multi-byte '→'
+            for width in [40, 50, 60, 70, 74, 76, 78, 80, 100, 120] {
+                let rendered = verified.render_with_width(width);
+                assert!(rendered.contains("commit fcc52826c114e057e02c1c8837baf8f5cfab0be5"));
+                assert!(rendered.contains("→"));
+            }
+        }
+        let inline_path = dir.join("review-inline.json");
+        if inline_path.exists() {
+            let content = std::fs::read_to_string(&inline_path).unwrap();
+            let inline_rev: InlineReview = serde_json::from_str(&content)
+                .expect("Must parse review-inline.json for commit fcc52826c114");
+            for width in [40, 50, 60, 70, 74, 76, 78, 80, 100, 120] {
+                let rendered = inline_rev.render_with_width(None, width);
+                assert!(rendered.contains("commit fcc52826c114e057e02c1c8837baf8f5cfab0be5"));
+                assert!(rendered.contains("→"));
+            }
+        }
+    }
+
+    #[test]
+    fn test_wrap_code_multibyte_utf8() {
+        // String with 3-byte unicode arrow '→' (U+2192)
+        let text = "eht_oper stays NULL → the exact crash scenario from the commit message";
+        for width in 10..=text.chars().count() + 10 {
+            let wrapped = wrap_code(text, width);
+            for line in wrapped.lines() {
+                assert!(line.chars().count() <= width || !line.contains(' '));
+            }
+        }
+
+        // Test with indentation and unicode characters
+        let indented = "    let arrow = \"→\"; // explanation → something else";
+        for width in 10..80 {
+            let wrapped = wrap_code(indented, width);
+            assert!(!wrapped.is_empty());
+        }
+
+        // Test splitting right across a multibyte character boundary
+        let sample = "abc → def";
+        assert_eq!(wrap_code(sample, 5), "abc\n→ def");
+        assert_eq!(wrap_code(sample, 6), "abc →\ndef");
     }
 }

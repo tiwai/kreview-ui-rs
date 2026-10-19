@@ -1760,7 +1760,10 @@ impl TuiApp {
                 .get(model_id)
                 .map(|m| &m.description)
                 .unwrap_or(model_id);
-            let header_str = if desc.len() > 7 { &desc[..7] } else { desc };
+            let header_str = match desc.char_indices().nth(7) {
+                Some((idx, _)) => &desc[..idx],
+                None => desc,
+            };
             header_cells.push(CellFormat::header(header_str, theme.header_fg));
             widths.push(Constraint::Length(12));
         }
@@ -3668,5 +3671,68 @@ mod tests {
         assert!(app.status_message.is_some());
 
         let _ = std::fs::remove_dir_all(&temp_dir);
+    }
+
+    #[test]
+    fn test_action_show_review_and_verified_commit_fcc52826c114() {
+        let db_path = PathBuf::from("/home/tiwai/tmp/kreviews/db");
+        let commit_dir = db_path.join("qwen3.8-27b/fc/fcc52826c114e057e02c1c8837baf8f5cfab0be5");
+        if !commit_dir.exists() {
+            return;
+        }
+        let mut config = Config::default();
+        config.database_path = db_path;
+        let mut state = AppState::new(config);
+        state.visible_models = vec!["qwen3.8-27b".to_string()];
+
+        let mut reviews = HashMap::new();
+        let metadata = ReviewMetadata {
+            author: "Takashi Iwai <tiwai@suse.de>".to_string(),
+            subject: "[PATCH] wifi: cfg80211: enforce HE/EHT cap/oper consistency".to_string(),
+            issues_found: 1,
+            issue_severity_score: Severity::High,
+            issue_severity_explanation: String::new(),
+            sha: "fcc52826c114e057e02c1c8837baf8f5cfab0be5".to_string(),
+            model: "qwen3.8-27b".to_string(),
+            review_time_seconds: 673.17,
+            input_tokens: 17757,
+            output_tokens: 6597,
+            total_tokens: 24354,
+            suse_commit: None,
+            upstream_commit: None,
+            has_pre_verification: false,
+            has_verified_result: true,
+            findings_downstream_only: 1,
+            has_fix_patches: false,
+        };
+        reviews.insert("qwen3.8-27b".to_string(), metadata);
+
+        let commit = CommitReview {
+            sha: "fcc52826c114e057e02c1c8837baf8f5cfab0be5".to_string(),
+            subject: "[PATCH] wifi: cfg80211: enforce HE/EHT cap/oper consistency".to_string(),
+            author: "Takashi Iwai <tiwai@suse.de>".to_string(),
+            committer: "Takashi Iwai <tiwai@suse.de>".to_string(),
+            suse_commit: None,
+            upstream_commit: None,
+            reviews,
+            status: Status::Unread,
+        };
+
+        let mut app = TuiApp::new(state);
+        app.action_show_review(&commit, 0);
+        if let ActiveScreen::ContentViewer(s) = &app.active_screen {
+            assert!(s.content.contains("fcc52826c114e057e02c1c8837baf8f5cfab0be5"));
+            assert!(s.content.contains("→"));
+        } else {
+            panic!("Expected ContentViewer for review");
+        }
+
+        app.action_show_verified_result(&commit, "qwen3.8-27b");
+        if let ActiveScreen::ContentViewer(s) = &app.active_screen {
+            assert!(s.content.contains("fcc52826c114e057e02c1c8837baf8f5cfab0be5"));
+            assert!(s.content.contains("→"));
+        } else {
+            panic!("Expected ContentViewer for verified result");
+        }
     }
 }
