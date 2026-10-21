@@ -46,6 +46,7 @@ pub struct ThemeStyles {
     pub verified_result_fg: Color,
     pub findings_downstream_only_fg: Color,
     pub issue_count_fg: Color,
+    pub issue_fixed_fg: Color,
     pub issue_count_bg: Color,
     pub default_text_fg: Color,
     pub default_bg: Color,
@@ -76,6 +77,7 @@ impl ThemeStyles {
                 verified_result_fg: Color::Magenta,
                 findings_downstream_only_fg: Color::LightBlue,
                 issue_count_fg: Color::LightRed,
+                issue_fixed_fg: Color::LightGreen,
                 issue_count_bg: Color::Rgb(50, 20, 20),
                 default_text_fg: Color::White,
                 default_bg: Color::Black,
@@ -102,6 +104,7 @@ impl ThemeStyles {
                 verified_result_fg: Color::Magenta,
                 findings_downstream_only_fg: Color::Blue,
                 issue_count_fg: Color::Red,
+                issue_fixed_fg: Color::Green,
                 issue_count_bg: Color::Rgb(255, 220, 220),
                 default_text_fg: Color::Black,
                 default_bg: Color::White,
@@ -1066,6 +1069,7 @@ impl TuiApp {
                 model_markup: String,
                 model_printed: String,
                 issues: String,
+                fixed: String,
                 pre_verified: String,
                 verified: String,
                 downstream_only: String,
@@ -1094,6 +1098,11 @@ impl TuiApp {
                     };
 
                     let issues = review.issues_found.to_string();
+                    let fixed = if review.issues_fixed > 0 {
+                        review.issues_fixed.to_string()
+                    } else {
+                        "-".to_string()
+                    };
                     let pre_verified = if review.has_pre_verification {
                         "yes".to_string()
                     } else {
@@ -1105,7 +1114,7 @@ impl TuiApp {
                         "-".to_string()
                     };
                     let downstream_only = review.findings_downstream_only.to_string();
-                    let severity = if review.issues_found > 0
+                    let severity = if review.open_issues() > 0
                         && review.issue_severity_score != Severity::None
                     {
                         review.issue_severity_score.as_str().to_uppercase()
@@ -1117,12 +1126,13 @@ impl TuiApp {
                     } else {
                         "-".to_string()
                     };
-                    let has_issues = review.issues_found > 0;
+                    let has_issues = review.open_issues() > 0;
 
                     rows.push(ModelRow {
                         model_markup,
                         model_printed,
                         issues,
+                        fixed,
                         pre_verified,
                         verified,
                         downstream_only,
@@ -1136,6 +1146,7 @@ impl TuiApp {
             if !rows.is_empty() {
                 let h_model = "Model";
                 let h_issues = "Issues";
+                let h_fixed = "Fixed";
                 let h_pre_verify = "Pre-verify";
                 let h_verified = "Verified";
                 let h_downstream = "Downstream";
@@ -1144,6 +1155,7 @@ impl TuiApp {
 
                 let mut w_model = h_model.len();
                 let mut w_issues = h_issues.len();
+                let mut w_fixed = h_fixed.len();
                 let mut w_pre_verify = h_pre_verify.len();
                 let mut w_verified = h_verified.len();
                 let mut w_downstream = h_downstream.len();
@@ -1153,6 +1165,7 @@ impl TuiApp {
                 for r in &rows {
                     w_model = w_model.max(r.model_printed.len());
                     w_issues = w_issues.max(r.issues.len());
+                    w_fixed = w_fixed.max(r.fixed.len());
                     w_pre_verify = w_pre_verify.max(r.pre_verified.len());
                     w_verified = w_verified.max(r.verified.len());
                     w_downstream = w_downstream.max(r.downstream_only.len());
@@ -1162,9 +1175,10 @@ impl TuiApp {
 
                 // Construct top border
                 let top_border = format!(
-                    "┌─{}─┬─{}─┬─{}─┬─{}─┬─{}─┬─{}─┬─{}─┐\n",
+                    "┌─{}─┬─{}─┬─{}─┬─{}─┬─{}─┬─{}─┬─{}─┬─{}─┐\n",
                     "─".repeat(w_model),
                     "─".repeat(w_issues),
+                    "─".repeat(w_fixed),
                     "─".repeat(w_pre_verify),
                     "─".repeat(w_verified),
                     "─".repeat(w_downstream),
@@ -1175,9 +1189,10 @@ impl TuiApp {
 
                 // Construct header
                 let header_line = format!(
-                    "│ {:<w_model$} │ {:<w_issues$} │ {:<w_pre_verify$} │ {:<w_verified$} │ {:<w_downstream$} │ {:<w_severity$} │ {:<w_patches$} │\n",
+                    "│ {:<w_model$} │ {:<w_issues$} │ {:<w_fixed$} │ {:<w_pre_verify$} │ {:<w_verified$} │ {:<w_downstream$} │ {:<w_severity$} │ {:<w_patches$} │\n",
                     h_model,
                     h_issues,
+                    h_fixed,
                     h_pre_verify,
                     h_verified,
                     h_downstream,
@@ -1185,6 +1200,7 @@ impl TuiApp {
                     h_patches,
                     w_model = w_model,
                     w_issues = w_issues,
+                    w_fixed = w_fixed,
                     w_pre_verify = w_pre_verify,
                     w_verified = w_verified,
                     w_downstream = w_downstream,
@@ -1195,9 +1211,10 @@ impl TuiApp {
 
                 // Construct separator border
                 let sep_border = format!(
-                    "├─{}─┼─{}─┼─{}─┼─{}─┼─{}─┼─{}─┼─{}─┤\n",
+                    "├─{}─┼─{}─┼─{}─┼─{}─┼─{}─┼─{}─┼─{}─┼─{}─┤\n",
                     "─".repeat(w_model),
                     "─".repeat(w_issues),
+                    "─".repeat(w_fixed),
                     "─".repeat(w_pre_verify),
                     "─".repeat(w_verified),
                     "─".repeat(w_downstream),
@@ -1212,15 +1229,17 @@ impl TuiApp {
                     let formatted_model = format!("{}{}", r.model_markup, padding_spaces);
 
                     let row_line = format!(
-                        "│ {} │ {:<w_issues$} │ {:<w_pre_verify$} │ {:<w_verified$} │ {:<w_downstream$} │ {:<w_severity$} │ {:<w_patches$} │\n",
+                        "│ {} │ {:<w_issues$} │ {:<w_fixed$} │ {:<w_pre_verify$} │ {:<w_verified$} │ {:<w_downstream$} │ {:<w_severity$} │ {:<w_patches$} │\n",
                         formatted_model,
                         r.issues,
+                        r.fixed,
                         r.pre_verified,
                         r.verified,
                         r.downstream_only,
                         r.severity,
                         r.patches,
                         w_issues = w_issues,
+                        w_fixed = w_fixed,
                         w_pre_verify = w_pre_verify,
                         w_verified = w_verified,
                         w_downstream = w_downstream,
@@ -1238,9 +1257,10 @@ impl TuiApp {
 
                 // Construct bottom border
                 let bottom_border = format!(
-                    "└─{}─┴─{}─┴─{}─┴─{}─┴─{}─┴─{}─┴─{}─┘\n",
+                    "└─{}─┴─{}─┴─{}─┴─{}─┴─{}─┴─{}─┴─{}─┴─{}─┘\n",
                     "─".repeat(w_model),
                     "─".repeat(w_issues),
+                    "─".repeat(w_fixed),
                     "─".repeat(w_pre_verify),
                     "─".repeat(w_verified),
                     "─".repeat(w_downstream),
@@ -1781,7 +1801,7 @@ impl TuiApp {
                 commit
                     .reviews
                     .get(model_id)
-                    .map(|r| r.issues_found > 0)
+                    .map(|r| r.open_issues() > 0)
                     .unwrap_or(false)
             });
 
@@ -1832,7 +1852,7 @@ impl TuiApp {
                             .fg(theme.selected_fg)
                             .bg(theme.selected_bg)
                             .add_modifier(Modifier::BOLD)
-                    } else if review.issues_found > 0 {
+                    } else if review.open_issues() > 0 {
                         Style::default()
                             .bg(theme.issue_count_bg)
                             .add_modifier(Modifier::BOLD)
@@ -1888,7 +1908,7 @@ impl TuiApp {
                 .fg(theme.selected_fg)
                 .bg(theme.selected_bg)
                 .add_modifier(Modifier::BOLD)
-        } else if review.issues_found > 0 {
+        } else if review.open_issues() > 0 {
             Style::default()
                 .bg(theme.issue_count_bg)
                 .add_modifier(Modifier::BOLD)
@@ -1901,9 +1921,9 @@ impl TuiApp {
         };
 
         // Issues count
-        if review.issues_found > 0 {
+        if review.open_issues() > 0 {
             spans.push(Span::styled(
-                review.issues_found.to_string(),
+                review.open_issues().to_string(),
                 base_style
                     .fg(theme.issue_count_fg)
                     .add_modifier(Modifier::BOLD),
@@ -1937,8 +1957,18 @@ impl TuiApp {
             ));
         }
 
+        // Fixed issues F<n>
+        if review.issues_fixed > 0 {
+            spans.push(Span::styled(
+                format!("F{}", review.issues_fixed),
+                base_style
+                    .fg(theme.issue_fixed_fg)
+                    .add_modifier(Modifier::BOLD),
+            ));
+        }
+
         // Severity
-        if review.issues_found > 0 && review.issue_severity_score != Severity::None {
+        if review.open_issues() > 0 && review.issue_severity_score != Severity::None {
             let sev_str = match review.issue_severity_score {
                 Severity::None => "",
                 Severity::Low => "L",
@@ -3106,6 +3136,7 @@ mod tests {
                 author: "Author A".to_string(),
                 subject: "Commit 1".to_string(),
                 issues_found: 2,
+                issues_fixed: 0,
                 issue_severity_score: Severity::Low,
                 issue_severity_explanation: "None".to_string(),
                 sha: "1111111111111111111111111111111111111111".to_string(),
@@ -3380,6 +3411,7 @@ mod tests {
             author: "Author A".to_string(),
             subject: "Commit 1".to_string(),
             issues_found: 2,
+            issues_fixed: 0,
             issue_severity_score: Severity::Low,
             issue_severity_explanation: "None".to_string(),
             sha: "1111111111111111111111111111111111111111".to_string(),
@@ -3426,6 +3458,7 @@ mod tests {
             author: "Author A".to_string(),
             subject: "Commit 2".to_string(),
             issues_found: 0,
+            issues_fixed: 0,
             issue_severity_score: Severity::High,
             issue_severity_explanation: "Stale explanation".to_string(),
             sha: "2222222222222222222222222222222222222222".to_string(),
@@ -3586,6 +3619,7 @@ mod tests {
             author: "Author".to_string(),
             subject: "test subject".to_string(),
             issues_found: 1,
+            issues_fixed: 0,
             issue_severity_score: Severity::Medium,
             issue_severity_explanation: String::new(),
             sha: "0c7674d3d65a1b2b178e8f66495e79b048aee834".to_string(),
@@ -3662,6 +3696,7 @@ mod tests {
             author: "Author".to_string(),
             subject: "test subject".to_string(),
             issues_found: 1,
+            issues_fixed: 0,
             issue_severity_score: Severity::Medium,
             issue_severity_explanation: String::new(),
             sha: "1111111111111111111111111111111111111111".to_string(),
@@ -3722,6 +3757,7 @@ mod tests {
             author: "Takashi Iwai <tiwai@suse.de>".to_string(),
             subject: "[PATCH] wifi: cfg80211: enforce HE/EHT cap/oper consistency".to_string(),
             issues_found: 1,
+            issues_fixed: 0,
             issue_severity_score: Severity::High,
             issue_severity_explanation: String::new(),
             sha: "fcc52826c114e057e02c1c8837baf8f5cfab0be5".to_string(),

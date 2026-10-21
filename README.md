@@ -12,6 +12,7 @@ A high-performance Terminal UI (TUI) program written in Rust for displaying and 
 - **Inline Review Highlighting:** Parses and styles quoted code segments starting with `>` inside review text blocks, preserving exact indentation, multiple spaces, and 8-character Linux kernel tab-alignments.
 - **Persistent Status Tracking:** Toggle status (`⚪ Unread` → `✅ OK` → `❌ Bad`) with persistent marker files stored securely. Existing notes inside status marker files are safely preserved.
 - **Commit Notes:** Write, edit, and view multi-line note texts for any commit. Notes are stored under a configurable notes directory (defaulting to `~/.local/kreview-ui/notes`) and are displayed prominently at the beginning of the commit view.
+- **Fixed Issues:** Issues already fixed later in the same branch (DB schema v2) are shown as a green `F<n>` marker; the cell count, severity filter and highlighting use open issues (found − fixed).
 - **Diff View:** Compare downstream and upstream commits to see code differences (commit log excluded) via the `d` key.
 - **AI Fix Patches:** View AI-generated fix patches (indicated by a green `+` next to severity in the main table, and `[patches available]` in the downstream view) by pressing the `p` key inside the individual model review.
 - **Multilayer Config Cascading:** Config values merge seamlessly: Command Line Args (`--config <path>`) > User `~/.config/kreview-ui.json` > System `/etc/kreview-ui.json` > Default values.

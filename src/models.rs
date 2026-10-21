@@ -49,6 +49,8 @@ pub struct ReviewMetadata {
         deserialize_with = "deserialize_issues_found"
     )]
     pub issues_found: u32,
+    #[serde(rename = "issues-fixed", default)]
+    pub issues_fixed: u32,
     #[serde(
         rename = "issue-severity-score",
         default = "default_severity",
@@ -57,7 +59,9 @@ pub struct ReviewMetadata {
     pub issue_severity_score: Severity,
     #[serde(rename = "issue-severity-explanation", default)]
     pub issue_severity_explanation: String,
+    #[serde(default)]
     pub sha: String,
+    #[serde(default)]
     pub model: String,
     #[serde(rename = "review-time-seconds", default)]
     pub review_time_seconds: f64,
@@ -90,6 +94,14 @@ impl ReviewMetadata {
         if self.issues_found == 0 {
             self.issue_severity_score = Severity::None;
         }
+        if self.issues_fixed > self.issues_found {
+            self.issues_fixed = self.issues_found;
+        }
+    }
+
+    /// Issues that are not (yet) fixed in the same branch.
+    pub fn open_issues(&self) -> u32 {
+        self.issues_found.saturating_sub(self.issues_fixed)
     }
 }
 
@@ -146,6 +158,10 @@ pub struct Finding {
     pub confidence: Option<serde_json::Value>,
     pub message: Option<String>,
     pub evidence: Option<String>,
+    #[serde(rename = "fix-status", default)]
+    pub fix_status: Option<String>,
+    #[serde(rename = "future-fix", default)]
+    pub future_fix: Option<serde_json::Value>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -161,6 +177,8 @@ pub struct InlineReview {
     pub upstream_commit: Option<String>,
     pub backport: Option<BackportInfo>,
     pub summary: Option<String>,
+    #[serde(rename = "issues-fixed", default)]
+    pub issues_fixed: Option<u32>,
     #[serde(default)]
     pub findings: Vec<Finding>,
     #[serde(rename = "review-time-seconds", default)]
@@ -302,6 +320,7 @@ fn parse_verified_finding_from_map(map: &serde_json::Map<String, serde_json::Val
     f.validity = map.get("validity").and_then(|v| v.as_str()).map(String::from);
     f.comment = map.get("comment").and_then(|v| v.as_str()).map(String::from);
     f.future_fix = map.get("future-fix").or_else(|| map.get("future_fix")).or_else(|| map.get("later-fix")).or_else(|| map.get("later_fix")).cloned();
+    f.fix_status = map.get("fix-status").or_else(|| map.get("fix_status")).and_then(|v| v.as_str()).map(String::from);
     f.fixed_by = map.get("fixed-by").or_else(|| map.get("fixed_by")).cloned();
     f.in_upstream = map.get("in-upstream").or_else(|| map.get("in_upstream")).or_else(|| map.get("inherited-from-upstream")).or_else(|| map.get("inherited_from_upstream")).or_else(|| map.get("upstream-present")).or_else(|| map.get("present-in-upstream")).cloned();
     Some(f)
@@ -419,6 +438,8 @@ pub struct VerifiedFinding {
     pub comment: Option<String>,
     #[serde(rename = "future-fix", alias = "future_fix", alias = "later-fix", alias = "later_fix")]
     pub future_fix: Option<serde_json::Value>,
+    #[serde(rename = "fix-status", alias = "fix_status")]
+    pub fix_status: Option<String>,
     #[serde(rename = "fixed-by", alias = "fixed_by")]
     pub fixed_by: Option<serde_json::Value>,
     #[serde(
@@ -432,7 +453,20 @@ pub struct VerifiedFinding {
     pub in_upstream: Option<serde_json::Value>,
 }
 
+/// Formats "fixed - 5bf62f727580 (origin/SLE12-SP5)" like review-inline.txt.
+fn format_fix_status(status: Option<&str>, fix: Option<&str>) -> Option<String> {
+    let status = status.filter(|s| !s.trim().is_empty())?;
+    match fix.filter(|f| !f.trim().is_empty()) {
+        Some(f) => Some(format!("{} - {}", status, f)),
+        None => Some(status.to_string()),
+    }
+}
+
 impl VerifiedFinding {
+    pub fn fix_status_line(&self) -> Option<String> {
+        format_fix_status(self.fix_status.as_deref(), self.future_fix_string().as_deref())
+    }
+
     pub fn status(&self) -> Option<&str> {
         self.verdict
             .as_deref()
@@ -565,6 +599,11 @@ pub struct VerifiedResult {
     pub issues_found: Option<u32>,
     #[serde(rename = "issues_found")]
     pub issues_found_alt: Option<u32>,
+    #[serde(rename = "schema-version")]
+    pub schema_version: Option<u32>,
+    #[serde(rename = "issues-fixed", alias = "issues_fixed")]
+    pub issues_fixed: Option<u32>,
+    pub notes: Option<String>,
 
     #[serde(
         rename = "total-findings-before-verification",
@@ -942,7 +981,22 @@ impl VerifiedResult {
                         res.verifications = arr.clone();
                     }
                 }
-                "later-fix" | "future_fix_notes" | "later_fix" | "later-fixes" | "later_fixes" => {
+                "schema-version" | "schema_version" => {
+                    if let Some(n) = as_u32(&value) {
+                        res.schema_version = Some(n);
+                    }
+                }
+                "issues-fixed" | "issues_fixed" => {
+                    if let Some(n) = as_u32(&value) {
+                        res.issues_fixed = Some(n);
+                    }
+                }
+                "notes" => {
+                    if let Some(s) = as_string(&value) {
+                        res.notes = Some(s);
+                    }
+                }
+                "later-fix" | "future-fix" | "future_fix" | "future_fix_notes" | "later_fix" | "later-fixes" | "later_fixes" => {
                     res.later_fix = Some(value);
                 }
                 _ => {}
@@ -1130,8 +1184,14 @@ impl VerifiedResult {
         if let Some(v) = self.verified {
             out.push_str(&format!("Verified: {}\n", v));
         }
+        if let Some(n) = self.schema_version {
+            out.push_str(&format!("Schema-version: {}\n", n));
+        }
         if let Some(n) = self.issues_found() {
             out.push_str(&format!("Issues-found: {}\n", n));
+        }
+        if let Some(n) = self.issues_fixed {
+            out.push_str(&format!("Issues-fixed: {}\n", n));
         }
         if let Some(n) = self.total_findings_before_verification {
             out.push_str(&format!("Total-findings-before-verification: {}\n", n));
@@ -1161,8 +1221,15 @@ impl VerifiedResult {
             .and_then(|v| v.as_str());
         if let Some(s) = later_fix_text {
             if !s.trim().is_empty() && s.trim().to_lowercase() != "null" {
-                out.push_str("\n=== Later Fix ===\n");
+                out.push_str("\n=== Future Fix ===\n");
                 out.push_str(&wrap_text(s, width));
+                out.push('\n');
+            }
+        }
+        if let Some(ref notes) = self.notes {
+            if !notes.trim().is_empty() {
+                out.push_str("\n=== Notes ===\n");
+                out.push_str(&wrap_text(notes, width));
                 out.push('\n');
             }
         }
@@ -1205,6 +1272,9 @@ impl VerifiedResult {
                 if let Some(us) = finding.upstream_status_str() {
                     out.push_str(&format!("Upstream-status: {}\n", us));
                 }
+                if let Some(line) = finding.fix_status_line() {
+                    out.push_str(&format!("Fix-status: {}\n", line));
+                }
                 if let Some(ref un) = finding.upstream_note {
                     out.push_str("\nUpstream-note:\n");
                     out.push_str(&wrap_text(un, width));
@@ -1230,7 +1300,7 @@ impl VerifiedResult {
                     out.push_str(&wrap_text(comment, width));
                     out.push('\n');
                 }
-                if let Some(ref fix) = finding.future_fix_string() {
+                if let (None, Some(ref fix)) = (&finding.fix_status, finding.future_fix_string()) {
                     out.push_str("\nFuture-fix:\n");
                     out.push_str(&wrap_text(fix, width));
                     out.push('\n');
@@ -1264,6 +1334,9 @@ impl VerifiedResult {
                 if let Some(us) = finding.upstream_status_str() {
                     out.push_str(&format!("Upstream-status: {}\n", us));
                 }
+                if let Some(line) = finding.fix_status_line() {
+                    out.push_str(&format!("Fix-status: {}\n", line));
+                }
                 if let Some(ref un) = finding.upstream_note {
                     out.push_str("\nUpstream-note:\n");
                     out.push_str(&wrap_text(un, width));
@@ -1289,7 +1362,7 @@ impl VerifiedResult {
                     out.push_str(&wrap_text(comment, width));
                     out.push('\n');
                 }
-                if let Some(ref fix) = finding.future_fix_string() {
+                if let (None, Some(ref fix)) = (&finding.fix_status, finding.future_fix_string()) {
                     out.push_str("\nFuture-fix:\n");
                     out.push_str(&wrap_text(fix, width));
                     out.push('\n');
@@ -1489,6 +1562,9 @@ impl InlineReview {
         out.push_str(&format!("Input-tokens: {}\n", self.input_tokens));
         out.push_str(&format!("Output-tokens: {}\n", self.output_tokens));
         out.push_str(&format!("Total-tokens: {}\n", self.total_tokens));
+        if let Some(n) = self.issues_fixed {
+            out.push_str(&format!("Issues-fixed: {}\n", n));
+        }
 
         if !self.findings.is_empty() {
             out.push_str("\n=== Findings ===\n");
@@ -1511,6 +1587,10 @@ impl InlineReview {
                         _ => conf.to_string(),
                     };
                     out.push_str(&format!("Confidence: {}\n", conf_str));
+                }
+                let fix = finding.future_fix.as_ref().and_then(|v| v.as_str());
+                if let Some(line) = format_fix_status(finding.fix_status.as_deref(), fix) {
+                    out.push_str(&format!("Fix-status: {}\n", line));
                 }
 
                 if let Some(ref msg) = finding.message {
@@ -2328,5 +2408,36 @@ mod tests {
             );
         }
     }
-}
 
+    #[test]
+    fn test_issues_fixed_metadata_and_renderers() {
+        let meta: ReviewMetadata = serde_json::from_str(
+            r#"{"author":"a","subject":"s","sha":"x","model":"m","issues-found":3,"issues-fixed":1,"issue-severity-score":"high"}"#,
+        )
+        .unwrap();
+        assert_eq!(meta.open_issues(), 2);
+
+        let v: VerifiedResult = serde_json::from_str(
+            r#"{"schema-version":2,"issues-found":2,"issues-fixed":1,
+            "future-fix":"fixed in branch","notes":"checked",
+            "findings":[{"category":"C","status":"confirmed","fix-status":"fixed","future-fix":"890a34fd113e (origin/SLE12-SP5)"}],
+            "pruned-findings":[{"category":"P","fix-status":null,"future-fix":null}]}"#,
+        )
+        .unwrap();
+        let out = v.render_with_width(80);
+        assert!(out.contains("Schema-version: 2"));
+        assert!(out.contains("Issues-fixed: 1"));
+        assert!(out.contains("Fix-status: fixed - 890a34fd113e (origin/SLE12-SP5)"));
+        assert!(out.contains("=== Future Fix ==="));
+        assert_eq!(out.matches("Fix-status:").count(), 1);
+
+        let inl: InlineReview = serde_json::from_str(
+            r#"{"commit":"c","author":"a","subject":"s","model":"m","issues-fixed":1,
+            "findings":[{"fix-status":"fixed-upstream","future-fix":"58192b9ce09b (upstream)"}]}"#,
+        )
+        .unwrap();
+        let out = inl.render_with_width(None, 80);
+        assert!(out.contains("Issues-fixed: 1"));
+        assert!(out.contains("Fix-status: fixed-upstream - 58192b9ce09b (upstream)"));
+    }
+}

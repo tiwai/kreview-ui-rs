@@ -189,7 +189,7 @@ impl AppState {
             filtered.retain(|c| {
                 self.visible_models.iter().any(|model_id| {
                     if let Some(r) = c.reviews.get(model_id) {
-                        r.issues_found > 0 && r.issue_severity_score >= *min_severity
+                        r.open_issues() > 0 && r.issue_severity_score >= *min_severity
                     } else {
                         false
                     }
@@ -392,6 +392,7 @@ mod tests {
                 author: "test author".to_string(),
                 subject: "test subject".to_string(),
                 issues_found: 1,
+                issues_fixed: 0,
                 issue_severity_score: Severity::Low,
                 issue_severity_explanation: String::new(),
                 sha: "test_sha".to_string(),
@@ -414,6 +415,7 @@ mod tests {
                 author: "test author".to_string(),
                 subject: "test subject".to_string(),
                 issues_found: 1,
+                issues_fixed: 0,
                 issue_severity_score: Severity::High,
                 issue_severity_explanation: String::new(),
                 sha: "test_sha".to_string(),
@@ -476,6 +478,7 @@ mod tests {
                 author: "test author".to_string(),
                 subject: "test subject".to_string(),
                 issues_found: 0,
+                issues_fixed: 0,
                 // Even if severity was not normalized and stayed High:
                 issue_severity_score: Severity::High,
                 issue_severity_explanation: "Stale high explanation".to_string(),
