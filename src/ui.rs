@@ -943,14 +943,7 @@ impl TuiApp {
                     }
                     KeyCode::Enter => {
                         if let Some(commit) = self.get_selected_commit() {
-                            if self.selected_col == 0 {
-                                self.action_show_downstream(&commit);
-                            } else {
-                                let model_idx = self.selected_col - 1;
-                                if model_idx < self.state.visible_models.len() {
-                                    self.action_show_review(&commit, model_idx);
-                                }
-                            }
+                            self.action_show_downstream(&commit);
                         }
                     }
                     KeyCode::Char('c') => {
@@ -2538,7 +2531,7 @@ impl TuiApp {
                     );
                     add_item(Some("Left / Right"), "Move column selection (Table)");
                     add_item(Some("Home / End"), "Jump to top / bottom");
-                    add_item(Some("Enter"), "View commit (Col 0) / View model review");
+                    add_item(Some("Enter"), "View downstream commit details");
                     add_item(Some("Esc / q"), "Go back to Main Table (Viewer)");
 
                     add_item(None, "Filtering & Configuration");
@@ -3801,6 +3794,85 @@ mod tests {
             assert!(s.content.contains("→"));
         } else {
             panic!("Expected ContentViewer for verified result");
+        }
+    }
+
+    #[test]
+    fn test_enter_key_opens_downstream_regardless_of_column() {
+        let mut config = Config::default();
+        config.database_path = PathBuf::from("nonexistent_db_path");
+        let mut state = AppState::new(config);
+        state.visible_models = vec!["model_a".to_string(), "model_b".to_string()];
+
+        let mut reviews = HashMap::new();
+        reviews.insert(
+            "model_a".to_string(),
+            ReviewMetadata {
+                author: "Author".to_string(),
+                subject: "Test Commit".to_string(),
+                issues_found: 1,
+                issues_fixed: 0,
+                issue_severity_score: Severity::Medium,
+                issue_severity_explanation: String::new(),
+                sha: "1234567890abcdef1234567890abcdef12345678".to_string(),
+                model: "model_a".to_string(),
+                review_time_seconds: 10.0,
+                input_tokens: 100,
+                output_tokens: 50,
+                total_tokens: 150,
+                suse_commit: None,
+                upstream_commit: None,
+                has_pre_verification: false,
+                has_verified_result: false,
+                findings_downstream_only: 0,
+                has_fix_patches: false,
+            },
+        );
+
+        let commit = CommitReview {
+            sha: "1234567890abcdef1234567890abcdef12345678".to_string(),
+            subject: "Test Commit".to_string(),
+            author: "Author".to_string(),
+            committer: "Author".to_string(),
+            suse_commit: None,
+            upstream_commit: None,
+            reviews,
+            status: Status::Unread,
+        };
+        state.commits = vec![commit.clone()];
+        state.filtered_commits = vec![commit];
+
+        let mut app = TuiApp::new(state);
+
+        let enter_key = KeyEvent {
+            code: KeyCode::Enter,
+            modifiers: KeyModifiers::NONE,
+            kind: KeyEventKind::Press,
+            state: KeyEventState::empty(),
+        };
+
+        // When selected_col == 0 (Subject)
+        app.selected_col = 0;
+        app.handle_key(enter_key);
+        if let ActiveScreen::ContentViewer(cv) = &app.active_screen {
+            assert!(cv.title.starts_with("Downstream Commit:"));
+        } else {
+            panic!("Expected ContentViewer with Downstream Commit title for col 0");
+        }
+
+        // Return to table
+        app.active_screen = ActiveScreen::MainTable;
+
+        // When selected_col == 1 (Model A review cell)
+        app.selected_col = 1;
+        app.handle_key(enter_key);
+        if let ActiveScreen::ContentViewer(cv) = &app.active_screen {
+            assert!(
+                cv.title.starts_with("Downstream Commit:"),
+                "Enter on review cell should open downstream commit view, not review"
+            );
+        } else {
+            panic!("Expected ContentViewer with Downstream Commit title for col 1");
         }
     }
 }

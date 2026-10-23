@@ -36,7 +36,7 @@ A high-performance Terminal UI (TUI) program written in Rust for displaying and 
 | `Up` / `Down` / `Left` / `Right` | Move cell selector |
 | `PageUp` / `PageDown` | Scroll 10 lines up / down |
 | `Home` / `End` | Jump to first / last row |
-| `Enter` | **Subject cell:** Open downstream view<br>**Model cell:** Open inline model review |
+| `Enter` | Open downstream commit details |
 | `x` | Toggle commit status (Unread → OK → Bad) |
 | `n` | Open Note Input dialog to add/edit notes for the selected commit |
 | `c` | Show downstream commit details |
