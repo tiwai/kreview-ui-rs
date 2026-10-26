@@ -21,6 +21,29 @@ impl Severity {
     }
 }
 
+impl std::str::FromStr for Severity {
+    type Err = String;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        match s.to_lowercase().as_str() {
+            "none" => Ok(Severity::None),
+            "low" => Ok(Severity::Low),
+            "medium" | "med" => Ok(Severity::Medium),
+            "high" => Ok(Severity::High),
+            _ => Err(format!(
+                "Invalid severity level: {}. Must be none, low, medium, or high.",
+                s
+            )),
+        }
+    }
+}
+
+impl std::fmt::Display for Severity {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}", self.as_str())
+    }
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
 pub enum Status {
@@ -1676,6 +1699,18 @@ mod tests {
         assert_eq!(Severity::Low.as_str(), "low");
         assert_eq!(Severity::Medium.as_str(), "medium");
         assert_eq!(Severity::High.as_str(), "high");
+    }
+
+    #[test]
+    fn test_severity_from_str_and_display() {
+        use std::str::FromStr;
+        assert_eq!(Severity::from_str("none").unwrap(), Severity::None);
+        assert_eq!(Severity::from_str("Low").unwrap(), Severity::Low);
+        assert_eq!(Severity::from_str("MEDIUM").unwrap(), Severity::Medium);
+        assert_eq!(Severity::from_str("med").unwrap(), Severity::Medium);
+        assert_eq!(Severity::from_str("high").unwrap(), Severity::High);
+        assert!(Severity::from_str("invalid").is_err());
+        assert_eq!(format!("{}", Severity::High), "high");
     }
 
     #[test]

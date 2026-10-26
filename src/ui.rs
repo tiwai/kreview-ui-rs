@@ -800,19 +800,39 @@ impl TuiApp {
                     match key.code {
                         KeyCode::Char('a') => {
                             let committers = self.state.get_unique_committers();
+                            let selected_index = if let Some(ref current_author) = self.state.author_filter {
+                                committers
+                                    .iter()
+                                    .position(|c| c == current_author)
+                                    .map(|idx| idx + 1)
+                                    .unwrap_or(0)
+                            } else {
+                                0
+                            };
+                            let scroll_offset = if selected_index > 14 {
+                                selected_index - 14
+                            } else {
+                                0
+                            };
                             self.active_dialog =
                                 ActiveDialog::CommitterFilter(CommitterFilterState {
                                     committers,
-                                    selected_index: 0,
-                                    scroll_offset: 0,
+                                    selected_index,
+                                    scroll_offset,
                                 });
                             return false;
                         }
                         KeyCode::Char('l') => {
+                            let selected_index = match self.state.severity_filter {
+                                Some(Severity::Low) => 1,
+                                Some(Severity::Medium) => 2,
+                                Some(Severity::High) => 3,
+                                _ => 0,
+                            };
                             self.active_dialog =
                                 ActiveDialog::SeverityFilter(SeverityFilterState {
                                     options: vec!["All Issues", "Low+", "Medium+", "High"],
-                                    selected_index: 0,
+                                    selected_index,
                                 });
                             return false;
                         }

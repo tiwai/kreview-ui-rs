@@ -48,6 +48,9 @@ struct Args {
     )]
     severity: Option<String>,
 
+    #[arg(long, help = "Filter commits by subject text")]
+    subject: Option<String>,
+
     #[arg(long, help = "Comma-separated list of models to show as columns")]
     models: Option<String>,
 
@@ -106,6 +109,36 @@ fn main() -> Result<(), Box<dyn Error>> {
                 .collect(),
         );
     }
+    if let Some(ref sev_str) = args.severity {
+        if sev_str.is_empty()
+            || sev_str.eq_ignore_ascii_case("off")
+            || sev_str.eq_ignore_ascii_case("all")
+        {
+            config.severity = None;
+        } else {
+            match sev_str.parse::<Severity>() {
+                Ok(sev) => config.severity = Some(sev),
+                Err(err) => {
+                    eprintln!("Error: {}", err);
+                    std::process::exit(1);
+                }
+            }
+        }
+    }
+    if let Some(author) = args.author {
+        if author.is_empty() {
+            config.author = None;
+        } else {
+            config.author = Some(author);
+        }
+    }
+    if let Some(subject) = args.subject {
+        if subject.is_empty() {
+            config.subject = None;
+        } else {
+            config.subject = Some(subject);
+        }
+    }
 
     // 3. Validate database path
     if !config.database_path.exists() {
@@ -129,29 +162,7 @@ fn main() -> Result<(), Box<dyn Error>> {
         );
     }
 
-    // 6. Apply startup filters from CLI
-    if let Some(auth) = args.author {
-        state.author_filter = Some(auth);
-    }
-
-    if let Some(ref sev_str) = args.severity {
-        let sev = match sev_str.to_lowercase().as_str() {
-            "none" => Severity::None,
-            "low" => Severity::Low,
-            "medium" => Severity::Medium,
-            "high" => Severity::High,
-            _ => {
-                eprintln!(
-                    "Error: Invalid severity level: {}. Must be none, low, medium, or high.",
-                    sev_str
-                );
-                std::process::exit(1);
-            }
-        };
-        state.severity_filter = Some(sev);
-    }
-
-    // Reapply filters to make sure active set is populated correctly
+    // 6. Ensure filters are applied
     state.apply_filters();
 
     // 7. Setup terminal and run TUI
@@ -205,5 +216,58 @@ mod tests {
         }
 
         assert_eq!(config.theme, "custom-light");
+    }
+
+    #[test]
+    fn test_args_severity() {
+        let args = Args::try_parse_from(["kreview-ui", "--severity", "high"]).unwrap();
+        assert_eq!(args.severity, Some("high".to_string()));
+    }
+
+    #[test]
+    fn test_args_author() {
+        let args = Args::try_parse_from(["kreview-ui", "--author", "Takashi"]).unwrap();
+        assert_eq!(args.author, Some("Takashi".to_string()));
+    }
+
+    #[test]
+    fn test_args_subject() {
+        let args = Args::try_parse_from(["kreview-ui", "--subject", "ALSA:"]).unwrap();
+        assert_eq!(args.subject, Some("ALSA:".to_string()));
+    }
+
+    #[test]
+    fn test_filter_override_logic() {
+        let mut config = Config {
+            severity: Some(Severity::Low),
+            author: Some("Old Author".to_string()),
+            subject: Some("Old Subject".to_string()),
+            ..Default::default()
+        };
+
+        let args = Args::try_parse_from([
+            "kreview-ui",
+            "--severity",
+            "medium",
+            "--author",
+            "New Author",
+            "--subject",
+            "New Subject",
+        ])
+        .unwrap();
+
+        if let Some(ref sev_str) = args.severity {
+            config.severity = Some(sev_str.parse::<Severity>().unwrap());
+        }
+        if let Some(author) = args.author {
+            config.author = Some(author);
+        }
+        if let Some(subject) = args.subject {
+            config.subject = Some(subject);
+        }
+
+        assert_eq!(config.severity, Some(Severity::Medium));
+        assert_eq!(config.author, Some("New Author".to_string()));
+        assert_eq!(config.subject, Some("New Subject".to_string()));
     }
 }

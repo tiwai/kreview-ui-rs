@@ -85,9 +85,18 @@ The program loads configurations automatically. An example JSON structure:
   "show_token_stats": true,
   "markers_dir": "/home/tiwai/.local/share/kreview-ui/markers",
   "notes_dir": "/home/tiwai/.local/kreview-ui/notes",
-  "models": ["qwen3.6", "gpt-oss"]
+  "models": ["qwen3.6", "gpt-oss"],
+  "severity": "low",
+  "author": "Takashi Iwai",
+  "subject": "ALSA"
 }
 ```
+
+### Startup Filters
+Default filters can be configured in the JSON config and overridden by CLI flags:
+- `"severity"`: Filter commits by minimum severity level (`"none"`, `"low"`, `"medium"`, `"high"`). Override on CLI with `--severity <level>`.
+- `"author"`: Filter commits by committer / author name substring. Override on CLI with `--author <name>`.
+- `"subject"`: Filter commits by commit subject substring. Override on CLI with `--subject <text>`.
 
 ### Theme Configuration
 The application supports both **Light** and **Dark** color themes based on the `"theme"` key:

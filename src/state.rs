@@ -69,6 +69,9 @@ impl AppState {
     pub fn new(config: Config) -> Self {
         let db = ReviewDatabase::new(config.database_path.clone());
         let visible_models = config.models.clone().unwrap_or_default();
+        let author_filter = config.author.clone();
+        let severity_filter = config.severity;
+        let subject_filter = config.subject.clone().unwrap_or_default();
         let mut state = AppState {
             config,
             db,
@@ -76,9 +79,9 @@ impl AppState {
             visible_models,
             commits: Vec::new(),
             filtered_commits: Vec::new(),
-            author_filter: None,
-            severity_filter: None,
-            subject_filter: String::new(),
+            author_filter,
+            severity_filter,
+            subject_filter,
             model_filter: HashSet::new(),
             commit_status: HashMap::new(),
         };
@@ -608,5 +611,18 @@ mod tests {
         state.author_filter = Some("Nonexistent".to_string());
         state.apply_filters();
         assert!(state.filtered_commits.is_empty());
+    }
+
+    #[test]
+    fn test_state_initialization_from_config_filters() {
+        let mut config = Config::default();
+        config.severity = Some(Severity::High);
+        config.author = Some("Takashi".to_string());
+        config.subject = Some("ALSA:".to_string());
+
+        let state = AppState::new(config);
+        assert_eq!(state.severity_filter, Some(Severity::High));
+        assert_eq!(state.author_filter, Some("Takashi".to_string()));
+        assert_eq!(state.subject_filter, "ALSA:");
     }
 }

@@ -1,3 +1,4 @@
+use crate::models::Severity;
 use serde::{Deserialize, Serialize};
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -14,6 +15,9 @@ pub struct Config {
     pub markers_dir: PathBuf,
     pub notes_dir: PathBuf,
     pub models: Option<Vec<String>>,
+    pub severity: Option<Severity>,
+    pub author: Option<String>,
+    pub subject: Option<String>,
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize, Default)]
@@ -28,6 +32,9 @@ pub struct ConfigJson {
     pub markers_dir: Option<String>,
     pub notes_dir: Option<String>,
     pub models: Option<Vec<String>>,
+    pub severity: Option<String>,
+    pub author: Option<String>,
+    pub subject: Option<String>,
 }
 
 impl Default for Config {
@@ -54,6 +61,9 @@ impl Default for Config {
             markers_dir,
             notes_dir,
             models: None,
+            severity: None,
+            author: None,
+            subject: None,
         }
     }
 }
@@ -144,6 +154,33 @@ impl Config {
         if let Some(models) = json.models {
             self.models = Some(models);
         }
+        if let Some(severity) = json.severity {
+            if severity.is_empty()
+                || severity.eq_ignore_ascii_case("off")
+                || severity.eq_ignore_ascii_case("all")
+            {
+                self.severity = None;
+            } else {
+                match severity.parse::<Severity>() {
+                    Ok(sev) => self.severity = Some(sev),
+                    Err(err) => eprintln!("Warning: {}", err),
+                }
+            }
+        }
+        if let Some(author) = json.author {
+            if author.is_empty() {
+                self.author = None;
+            } else {
+                self.author = Some(author);
+            }
+        }
+        if let Some(subject) = json.subject {
+            if subject.is_empty() {
+                self.subject = None;
+            } else {
+                self.subject = Some(subject);
+            }
+        }
     }
 }
 
@@ -206,15 +243,48 @@ mod tests {
         let config_file_path = temp_dir.join("kreview-ui-test-config.json");
         let content = r#"{
             "default_branch": "TEST_LOAD_BRANCH",
-            "theme": "ansi-light"
+            "theme": "ansi-light",
+            "severity": "medium",
+            "author": "Alice",
+            "subject": "fix"
         }"#;
         std::fs::write(&config_file_path, content).unwrap();
 
         let config_loaded = Config::load(Some(&config_file_path));
         assert_eq!(config_loaded.default_branch, "TEST_LOAD_BRANCH");
         assert_eq!(config_loaded.theme, "ansi-light");
+        assert_eq!(config_loaded.severity, Some(Severity::Medium));
+        assert_eq!(config_loaded.author, Some("Alice".to_string()));
+        assert_eq!(config_loaded.subject, Some("fix".to_string()));
 
         // Clean up
         let _ = std::fs::remove_file(config_file_path);
+    }
+
+    #[test]
+    fn test_config_filters_apply() {
+        let mut config = Config::default();
+        let json = ConfigJson {
+            severity: Some("high".to_string()),
+            author: Some("Bob".to_string()),
+            subject: Some("net:".to_string()),
+            ..Default::default()
+        };
+        config.apply_json(json);
+        assert_eq!(config.severity, Some(Severity::High));
+        assert_eq!(config.author, Some("Bob".to_string()));
+        assert_eq!(config.subject, Some("net:".to_string()));
+
+        // Test clearing filters with empty string or "off"
+        let json_clear = ConfigJson {
+            severity: Some("off".to_string()),
+            author: Some("".to_string()),
+            subject: Some("".to_string()),
+            ..Default::default()
+        };
+        config.apply_json(json_clear);
+        assert_eq!(config.severity, None);
+        assert_eq!(config.author, None);
+        assert_eq!(config.subject, None);
     }
 }
