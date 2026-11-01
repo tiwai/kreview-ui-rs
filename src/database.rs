@@ -92,7 +92,7 @@ impl ReviewDatabase {
                         .unwrap_or_default()
                         .to_string_lossy()
                         .into_owned();
-                    if filename != "list" {
+                    if filename != "list" && filename != "last" {
                         models.push(filename);
                     }
                 }
