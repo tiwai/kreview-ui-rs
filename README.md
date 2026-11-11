@@ -136,7 +136,7 @@ cargo build --release
 Export the rendered plain text of a review or verification result without starting the TUI. The commit SHA (full or abbreviated, at least 4 hex digits; must be unambiguous) and the model ID (its directory name in the database) are required.
 
 ```bash
-# Save the review to ./<sha12>-<model>-review.txt
+# Save the review to ./review-<model-description>-<sha12>.txt (same name as Ctrl-S in the TUI)
 kreview-ui --model gemma-4 --save-review <sha>
 
 # Print the verification result to stdout

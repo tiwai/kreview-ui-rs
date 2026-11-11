@@ -7,7 +7,7 @@ use crate::database::ReviewDatabase;
 use crate::git_ops::GitViewer;
 use crate::models::{InlineReview, VerifiedResult};
 use crate::state::fetch_commit_metadata;
-use crate::ui::strip_markup;
+use crate::ui::{strip_markup, title_to_filename};
 
 const EXPORT_WIDTH: usize = 80;
 
@@ -18,10 +18,10 @@ pub enum ExportKind {
 }
 
 impl ExportKind {
-    fn suffix(self) -> &'static str {
+    fn title(self) -> &'static str {
         match self {
-            ExportKind::Review => "review",
-            ExportKind::Verified => "verified",
+            ExportKind::Review => "Review",
+            ExportKind::Verified => "Verified Result",
         }
     }
 }
@@ -129,7 +129,17 @@ pub fn export(
         }
         _ => {
             let path = output.cloned().unwrap_or_else(|| {
-                PathBuf::from(format!("{}-{}-{}.txt", &sha[..12], model_id, kind.suffix()))
+                let name = db
+                    .load_models()
+                    .get(model_id)
+                    .map(|m| m.description.clone())
+                    .unwrap_or_else(|| model_id.to_string());
+                PathBuf::from(title_to_filename(&format!(
+                    "{}: {} - {}",
+                    kind.title(),
+                    name,
+                    &sha[..12]
+                )))
             });
             std::fs::write(&path, text).map_err(|e| format!("Cannot write {:?}: {}", path, e))?;
             Ok(path.display().to_string())

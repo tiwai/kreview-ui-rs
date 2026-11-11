@@ -1639,16 +1639,7 @@ impl TuiApp {
             .unwrap_or(&s.content);
         let plain = strip_markup(raw);
 
-        // Build a filesystem-safe filename from the title
-        let sanitized: String = s
-            .title
-            .chars()
-            .map(|c| if c.is_alphanumeric() { c } else { '-' })
-            .collect::<String>()
-            .to_lowercase();
-        // Collapse consecutive dashes and trim trailing/leading dashes
-        let parts: Vec<&str> = sanitized.split('-').filter(|p| !p.is_empty()).collect();
-        let filename = format!("{}.txt", parts.join("-"));
+        let filename = title_to_filename(&s.title);
 
         std::fs::write(&filename, plain)?;
         Ok(filename)
@@ -2788,6 +2779,17 @@ fn centered_rect(percent_x: u16, percent_y: u16, r: Rect) -> Rect {
             Constraint::Length((r.width.saturating_sub(percent_x)) / 2),
         ])
         .split(popup_layout[1])[1]
+}
+
+/// Build a filesystem-safe file name from a content viewer title.
+pub(crate) fn title_to_filename(title: &str) -> String {
+    let sanitized: String = title
+        .chars()
+        .map(|c| if c.is_alphanumeric() { c } else { '-' })
+        .collect::<String>()
+        .to_lowercase();
+    let parts: Vec<&str> = sanitized.split('-').filter(|p| !p.is_empty()).collect();
+    format!("{}.txt", parts.join("-"))
 }
 
 pub(crate) fn strip_markup(content: &str) -> String {
