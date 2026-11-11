@@ -26,20 +26,39 @@ impl ExportKind {
     }
 }
 
-fn check_args(db: &ReviewDatabase, model_id: &str, sha: &str) -> Result<(), String> {
-    if sha.len() < 12 || !sha.chars().all(|c| c.is_ascii_hexdigit()) {
-        return Err(format!("'{}' is not a full commit SHA", sha));
+/// Validate the arguments and expand an abbreviated SHA to the full one in the database.
+fn check_args(db: &ReviewDatabase, model_id: &str, sha: &str) -> Result<String, String> {
+    if sha.len() < 4 || !sha.chars().all(|c| c.is_ascii_hexdigit()) {
+        return Err(format!("'{}' is not a valid commit SHA", sha));
     }
     if !db.load_models().contains_key(model_id) {
         return Err(format!("Unknown model '{}'", model_id));
     }
-    Ok(())
+    let sha = sha.to_ascii_lowercase();
+    let dir = db.db_path.join(model_id).join(&sha[..2]);
+    let mut matches: Vec<String> = std::fs::read_dir(&dir)
+        .map(|rd| {
+            rd.filter_map(|e| e.ok())
+                .filter_map(|e| e.file_name().into_string().ok())
+                .filter(|n| n.starts_with(&sha))
+                .collect()
+        })
+        .unwrap_or_default();
+    if matches.contains(&sha) {
+        return Ok(sha);
+    }
+    match matches.len() {
+        0 => Ok(sha),
+        1 => Ok(matches.remove(0)),
+        _ => Err(format!("Ambiguous commit SHA '{}'", sha)),
+    }
 }
 
 /// Render the review text of the given commit & model as plain text.
 pub fn render_review(config: &Config, model_id: &str, sha: &str) -> Result<String, String> {
     let db = ReviewDatabase::new(config.database_path.clone());
-    check_args(&db, model_id, sha)?;
+    let sha = check_args(&db, model_id, sha)?;
+    let sha = sha.as_str();
     let no_review = || format!("No review for {}/{}", model_id, sha);
 
     if let Some(json_str) = db.get_review_content(model_id, sha, "review-inline.json") {
@@ -74,7 +93,8 @@ pub fn render_review(config: &Config, model_id: &str, sha: &str) -> Result<Strin
 /// Render the verification result of the given commit & model as plain text.
 pub fn render_verified(config: &Config, model_id: &str, sha: &str) -> Result<String, String> {
     let db = ReviewDatabase::new(config.database_path.clone());
-    check_args(&db, model_id, sha)?;
+    let sha = check_args(&db, model_id, sha)?;
+    let sha = sha.as_str();
     let json_str = db
         .get_review_content(model_id, sha, "verified-result.json")
         .ok_or_else(|| format!("No verification result for {}/{}", model_id, sha))?;
@@ -92,6 +112,9 @@ pub fn export(
     sha: &str,
     output: Option<&PathBuf>,
 ) -> Result<String, String> {
+    let db = ReviewDatabase::new(config.database_path.clone());
+    let sha = check_args(&db, model_id, sha)?;
+    let sha = sha.as_str();
     let text = match kind {
         ExportKind::Review => render_review(config, model_id, sha)?,
         ExportKind::Verified => render_verified(config, model_id, sha)?,
@@ -148,6 +171,14 @@ mod tests {
     }
 
     #[test]
+    fn test_export_abbreviated_sha() {
+        let (config, db) = setup("abbrev");
+        let text = render_review(&config, "test-model", &SHA[..8]).unwrap();
+        assert_eq!(text, "Hello\n");
+        let _ = std::fs::remove_dir_all(&db);
+    }
+
+    #[test]
     fn test_export_errors() {
         let (config, db) = setup("err");
         assert!(render_review(&config, "nomodel", SHA)
@@ -155,7 +186,7 @@ mod tests {
             .contains("Unknown model"));
         assert!(render_review(&config, "test-model", "xyz")
             .unwrap_err()
-            .contains("full commit SHA"));
+            .contains("valid commit SHA"));
         assert!(render_verified(&config, "test-model", SHA)
             .unwrap_err()
             .contains("No verification"));

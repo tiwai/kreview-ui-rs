@@ -133,17 +133,17 @@ cargo build --release
 
 ### Non-interactive usage
 
-Export the rendered plain text of a review or verification result without starting the TUI. The full commit SHA and the model ID (its directory name in the database) are required.
+Export the rendered plain text of a review or verification result without starting the TUI. The commit SHA (full or abbreviated, at least 4 hex digits; must be unambiguous) and the model ID (its directory name in the database) are required.
 
 ```bash
 # Save the review to ./<sha12>-<model>-review.txt
-kreview-ui --model gemma-4 --save-review <full-sha>
+kreview-ui --model gemma-4 --save-review <sha>
 
 # Print the verification result to stdout
-kreview-ui --model gemma-4 --save-verified <full-sha> --output -
+kreview-ui --model gemma-4 --save-verified <sha> --output -
 
 # Save to a given file
-kreview-ui --model gemma-4 --save-verified <full-sha> --output result.txt
+kreview-ui --model gemma-4 --save-verified <sha> --output result.txt
 ```
 
 The review export includes the diff when `--downstream-repo` (or the config) is set. Exit status is 1 on errors (unknown model, missing result, bad SHA).
