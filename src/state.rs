@@ -7,7 +7,7 @@ use crate::config::Config;
 use crate::database::ReviewDatabase;
 use crate::models::{Branch, CommitReview, Severity, Status};
 
-fn fetch_commit_metadata(repo_path: &Path, shas: &[String]) -> HashMap<String, (String, String)> {
+pub(crate) fn fetch_commit_metadata(repo_path: &Path, shas: &[String]) -> HashMap<String, (String, String)> {
     let mut result = HashMap::new();
     if shas.is_empty() || !repo_path.exists() {
         return result;

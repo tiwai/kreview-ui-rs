@@ -1,6 +1,7 @@
 mod config;
 use clap::Parser;
 mod database;
+mod export;
 mod git_ops;
 mod models;
 mod state;
@@ -68,6 +69,33 @@ struct Args {
         help = "Color theme to use (e.g. textual-dark, ansi-light, etc.)"
     )]
     theme: Option<String>,
+
+    #[arg(
+        long,
+        value_name = "SHA",
+        requires = "model",
+        conflicts_with = "save_verified",
+        help = "Save the review text of the commit (non-interactive; needs --model)"
+    )]
+    save_review: Option<String>,
+
+    #[arg(
+        long,
+        value_name = "SHA",
+        requires = "model",
+        help = "Save the verification result text of the commit (non-interactive; needs --model)"
+    )]
+    save_verified: Option<String>,
+
+    #[arg(long, help = "Model ID for --save-review / --save-verified")]
+    model: Option<String>,
+
+    #[arg(
+        long,
+        value_name = "PATH",
+        help = "Output file for --save-review / --save-verified ('-' for stdout)"
+    )]
+    output: Option<PathBuf>,
 }
 
 fn main() -> Result<(), Box<dyn Error>> {
@@ -147,6 +175,25 @@ fn main() -> Result<(), Box<dyn Error>> {
             config.database_path
         );
         std::process::exit(1);
+    }
+
+    // Non-interactive export operations
+    let export_req = match (&args.save_review, &args.save_verified) {
+        (Some(sha), _) => Some((export::ExportKind::Review, sha.clone())),
+        (None, Some(sha)) => Some((export::ExportKind::Verified, sha.clone())),
+        _ => None,
+    };
+    if let (Some((kind, sha)), Some(model)) = (export_req, args.model.as_deref()) {
+        match export::export(&config, kind, model, &sha, args.output.as_ref()) {
+            Ok(dest) => {
+                eprintln!("Saved to {}", dest);
+                return Ok(());
+            }
+            Err(e) => {
+                eprintln!("Error: {}", e);
+                std::process::exit(1);
+            }
+        }
     }
 
     // 4. Initialize state
@@ -269,5 +316,32 @@ mod tests {
         assert_eq!(config.severity, Some(Severity::Medium));
         assert_eq!(config.author, Some("New Author".to_string()));
         assert_eq!(config.subject, Some("New Subject".to_string()));
+    }
+
+    #[test]
+    fn test_args_save_options() {
+        let args = Args::try_parse_from([
+            "kreview-ui",
+            "--save-review",
+            "abc",
+            "--model",
+            "m",
+            "--output",
+            "-",
+        ])
+        .unwrap();
+        assert_eq!(args.save_review.as_deref(), Some("abc"));
+        assert_eq!(args.model.as_deref(), Some("m"));
+        assert!(Args::try_parse_from(["kreview-ui", "--save-review", "abc"]).is_err());
+        assert!(Args::try_parse_from([
+            "kreview-ui",
+            "--save-review",
+            "a",
+            "--save-verified",
+            "b",
+            "--model",
+            "m",
+        ])
+        .is_err());
     }
 }

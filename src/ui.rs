@@ -2790,7 +2790,7 @@ fn centered_rect(percent_x: u16, percent_y: u16, r: Rect) -> Rect {
         .split(popup_layout[1])[1]
 }
 
-fn strip_markup(content: &str) -> String {
+pub(crate) fn strip_markup(content: &str) -> String {
     let mut result = String::with_capacity(content.len());
     let mut remaining = content;
 
