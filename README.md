@@ -49,6 +49,7 @@ A high-performance Terminal UI (TUI) program written in Rust for displaying and 
 | `Ctrl+L` | Open **Severity Filter** dialog |
 | `Ctrl+F` | Open **Subject Search** dialog |
 | `Ctrl+B` | Open **Branch Switch** dialog |
+| `o` | Toggle **open issues only** filter |
 | `m` | Open **Model Column Visibility** dialog |
 | `q` | Quit application |
 
@@ -110,6 +111,7 @@ Default filters can be configured in the JSON config and overridden by CLI flags
 - `"severity"`: Filter commits by minimum severity level (`"none"`, `"low"`, `"medium"`, `"high"`). Override on CLI with `--severity <level>`.
 - `"author"`: Filter commits by committer / author name substring. Override on CLI with `--author <name>`.
 - `"subject"`: Filter commits by commit subject substring. Override on CLI with `--subject <text>`.
+- `"open_only"`: Boolean; when `true`, show only commits that still have open issues (toggle at runtime with `o`). Override on CLI with `--open-only[=BOOL]`.
 
 ### Theme Configuration
 The application supports both **Light** and **Dark** color themes based on the `"theme"` key:

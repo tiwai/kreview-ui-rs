@@ -19,6 +19,7 @@ pub struct Config {
     pub severity: Option<Severity>,
     pub author: Option<String>,
     pub subject: Option<String>,
+    pub open_only: bool,
     pub commands: Vec<UserCommand>,
 }
 
@@ -37,6 +38,7 @@ pub struct ConfigJson {
     pub severity: Option<String>,
     pub author: Option<String>,
     pub subject: Option<String>,
+    pub open_only: Option<bool>,
     pub commands: Option<Vec<UserCommand>>,
 }
 
@@ -67,6 +69,7 @@ impl Default for Config {
             severity: None,
             author: None,
             subject: None,
+            open_only: false,
             commands: Vec::new(),
         }
     }
@@ -185,6 +188,9 @@ impl Config {
                 self.subject = Some(subject);
             }
         }
+        if let Some(open_only) = json.open_only {
+            self.open_only = open_only;
+        }
         if let Some(commands) = json.commands {
             self.commands = commands
                 .into_iter()
@@ -216,6 +222,18 @@ mod tests {
             expand_tilde("/regular/path"),
             PathBuf::from("/regular/path")
         );
+    }
+
+    #[test]
+    fn test_config_open_only() {
+        let mut config = Config::default();
+        assert!(!config.open_only);
+        let json: ConfigJson = serde_json::from_str(r#"{"open_only": true}"#).unwrap();
+        config.apply_json(json);
+        assert!(config.open_only);
+        let json: ConfigJson = serde_json::from_str(r#"{"open_only": false}"#).unwrap();
+        config.apply_json(json);
+        assert!(!config.open_only);
     }
 
     #[test]

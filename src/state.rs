@@ -59,6 +59,7 @@ pub struct AppState {
     pub author_filter: Option<String>,
     pub severity_filter: Option<Severity>,
     pub subject_filter: String,
+    pub open_only: bool,
     pub model_filter: HashSet<String>,
 
     // Persisted status tracking
@@ -72,6 +73,7 @@ impl AppState {
         let author_filter = config.author.clone();
         let severity_filter = config.severity;
         let subject_filter = config.subject.clone().unwrap_or_default();
+        let open_only = config.open_only;
         let mut state = AppState {
             config,
             db,
@@ -82,6 +84,7 @@ impl AppState {
             author_filter,
             severity_filter,
             subject_filter,
+            open_only,
             model_filter: HashSet::new(),
             commit_status: HashMap::new(),
         };
@@ -197,6 +200,15 @@ impl AppState {
                         false
                     }
                 })
+            });
+        }
+
+        // 2b. Open-issues-only filter (any visible model still has unfixed issues)
+        if self.open_only {
+            filtered.retain(|c| {
+                self.visible_models
+                    .iter()
+                    .any(|m| c.reviews.get(m).is_some_and(|r| r.open_issues() > 0))
             });
         }
 
@@ -624,5 +636,77 @@ mod tests {
         assert_eq!(state.severity_filter, Some(Severity::High));
         assert_eq!(state.author_filter, Some("Takashi".to_string()));
         assert_eq!(state.subject_filter, "ALSA:");
+        assert!(!state.open_only);
+
+        let mut config = Config::default();
+        config.open_only = true;
+        assert!(AppState::new(config).open_only);
+    }
+
+    fn open_test_commit(sha: &str, model: &str, found: u32, fixed: u32) -> CommitReview {
+        let mut reviews = HashMap::new();
+        reviews.insert(
+            model.to_string(),
+            ReviewMetadata {
+                author: "a".to_string(),
+                subject: "s".to_string(),
+                issues_found: found,
+                issues_fixed: fixed,
+                issue_severity_score: Severity::High,
+                issue_severity_explanation: String::new(),
+                sha: sha.to_string(),
+                model: model.to_string(),
+                review_time_seconds: 0.0,
+                input_tokens: 0,
+                output_tokens: 0,
+                total_tokens: 0,
+                suse_commit: None,
+                upstream_commit: None,
+                has_pre_verification: false,
+                has_verified_result: false,
+                findings_downstream_only: 0,
+                has_fix_patches: false,
+            },
+        );
+        CommitReview {
+            sha: sha.to_string(),
+            subject: "s".to_string(),
+            author: "a".to_string(),
+            committer: "a".to_string(),
+            suse_commit: None,
+            upstream_commit: None,
+            status: Status::Unread,
+            reviews,
+        }
+    }
+
+    #[test]
+    fn test_open_only_filter() {
+        let mut config = Config::default();
+        config.database_path = std::path::PathBuf::from("nonexistent_db_path");
+        let mut state = AppState::new(config);
+        state.visible_models = vec!["m1".to_string()];
+        state.commits = vec![
+            open_test_commit("open", "m1", 2, 1),
+            open_test_commit("fixed", "m1", 2, 2),
+            open_test_commit("clean", "m1", 0, 0),
+            open_test_commit("hidden", "m2", 1, 0),
+        ];
+
+        state.apply_filters();
+        assert_eq!(state.filtered_commits.len(), 4);
+
+        state.open_only = true;
+        state.apply_filters();
+        let shas: Vec<_> = state
+            .filtered_commits
+            .iter()
+            .map(|c| c.sha.as_str())
+            .collect();
+        assert_eq!(shas, vec!["open"]);
+
+        state.open_only = false;
+        state.apply_filters();
+        assert_eq!(state.filtered_commits.len(), 4);
     }
 }

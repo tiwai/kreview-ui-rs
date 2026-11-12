@@ -1037,6 +1037,18 @@ impl TuiApp {
                             self.table_state.select(Some(self.selected_row));
                         }
                     }
+                    KeyCode::Char('o') => {
+                        self.state.open_only = !self.state.open_only;
+                        self.state.apply_filters();
+                        self.selected_row = 0;
+                        self.validate_selection();
+                        let msg = if self.state.open_only {
+                            "Open issues only: on"
+                        } else {
+                            "Open issues only: off"
+                        };
+                        self.status_message = Some((msg.to_string(), Instant::now()));
+                    }
                     KeyCode::Char('m') => {
                         let models_map = self.state.db.load_models();
                         let mut models = Vec::new();
@@ -1817,6 +1829,9 @@ impl TuiApp {
         if !self.state.subject_filter.is_empty() {
             info_parts.push(format!("Search: \"{}\"", self.state.subject_filter));
         }
+        if self.state.open_only {
+            info_parts.push("Open issues only".to_string());
+        }
         let subtitle = Paragraph::new(info_parts.join(" | "))
             .fg(theme.subtitle_fg)
             .bg(theme.subtitle_bg);
@@ -1875,7 +1890,7 @@ impl TuiApp {
         // Footer
         let default_footer: &str = match self.active_screen {
             ActiveScreen::MainTable => {
-                "h/?: Help | Enter: Cell Action | x: Toggle status | c: Downstream | s: SUSE | u: Upstream | d: Diff | 1-3: Review | Ctrl+A: Committer | Ctrl+L: Severity | Ctrl+F: Search | Ctrl+B: Branch | m: Models | q: Quit"
+                "h/?: Help | Enter: Cell Action | x: Toggle status | c: Downstream | s: SUSE | u: Upstream | d: Diff | 1-3: Review | Ctrl+A: Committer | Ctrl+L: Severity | Ctrl+F: Search | Ctrl+B: Branch | o: Open only | m: Models | q: Quit"
             }
             ActiveScreen::ContentViewer(_) => {
                 "h/?: Help | Esc/q: Back | Ctrl+S: Save | c: Downstream | s: SUSE | u: Upstream | d: Diff | p: Patches | v: Verified | 1-3: Review | Up/Down/Left/Right: Scroll"

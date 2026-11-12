@@ -53,6 +53,15 @@ struct Args {
     #[arg(long, help = "Filter commits by subject text")]
     subject: Option<String>,
 
+    #[arg(
+        long,
+        value_name = "BOOL",
+        num_args = 0..=1,
+        default_missing_value = "true",
+        help = "Show only commits with open issues (--open-only[=false])"
+    )]
+    open_only: Option<bool>,
+
     #[arg(long, help = "Comma-separated list of models to show as columns")]
     models: Option<String>,
 
@@ -167,6 +176,10 @@ fn main() -> Result<(), Box<dyn Error>> {
         } else {
             config.subject = Some(subject);
         }
+    }
+
+    if let Some(open_only) = args.open_only {
+        config.open_only = open_only;
     }
 
     // 3. Validate database path
@@ -317,6 +330,16 @@ mod tests {
         assert_eq!(config.severity, Some(Severity::Medium));
         assert_eq!(config.author, Some("New Author".to_string()));
         assert_eq!(config.subject, Some("New Subject".to_string()));
+    }
+
+    #[test]
+    fn test_args_open_only() {
+        let args = Args::try_parse_from(["kreview-ui"]).unwrap();
+        assert_eq!(args.open_only, None);
+        let args = Args::try_parse_from(["kreview-ui", "--open-only"]).unwrap();
+        assert_eq!(args.open_only, Some(true));
+        let args = Args::try_parse_from(["kreview-ui", "--open-only=false"]).unwrap();
+        assert_eq!(args.open_only, Some(false));
     }
 
     #[test]
