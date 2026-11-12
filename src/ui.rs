@@ -16,6 +16,7 @@ use crate::models::{
     strip_patch_prefix, CommitReview, ReviewMetadata, Severity, Status, VerifiedResult,
 };
 use crate::state::AppState;
+use crate::usercmd::{expand_command, CommandContext, CommandMode};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ColorTheme {
@@ -255,6 +256,7 @@ pub struct TuiApp {
     pub selected_col: usize,
     pub table_state: TableState,
     pub status_message: Option<(String, Instant)>,
+    pub pending_command: Option<(String, CommandMode)>,
 }
 
 impl TuiApp {
@@ -275,6 +277,7 @@ impl TuiApp {
             selected_col: 0,
             table_state: TableState::default().with_selected(Some(0)),
             status_message: None,
+            pending_command: None,
         }
     }
 
@@ -306,9 +309,114 @@ impl TuiApp {
                     if self.handle_key(key) {
                         return Ok(());
                     }
+
+                    if let Some((cmd, mode)) = self.pending_command.take() {
+                        self.run_external(terminal, &cmd, mode)?;
+                    }
                 }
             }
         }
+    }
+
+    /// Placeholder values for user commands, taken from the current screen
+    fn command_context(&self) -> CommandContext {
+        let branch = self
+            .state
+            .current_branch
+            .as_ref()
+            .map(|b| b.name.clone())
+            .unwrap_or_default();
+        match &self.active_screen {
+            ActiveScreen::ContentViewer(cv) => {
+                let get = |k: &str| cv.commit_info.get(k).cloned().unwrap_or_default();
+                CommandContext {
+                    branch,
+                    commit: get("downstream_sha"),
+                    suse: get("suse_sha"),
+                    upstream: get("upstream_sha"),
+                    model: get("model_id"),
+                }
+            }
+            _ => {
+                let commit = self.state.filtered_commits.get(self.selected_row);
+                let model = self
+                    .selected_col
+                    .checked_sub(1)
+                    .and_then(|i| self.state.visible_models.get(i))
+                    .cloned()
+                    .unwrap_or_default();
+                CommandContext {
+                    branch,
+                    commit: commit.map(|c| c.sha.clone()).unwrap_or_default(),
+                    suse: commit
+                        .and_then(|c| c.suse_commit.clone())
+                        .unwrap_or_default(),
+                    upstream: commit
+                        .and_then(|c| c.upstream_commit.clone())
+                        .unwrap_or_default(),
+                    model,
+                }
+            }
+        }
+    }
+
+    /// Run a user command; in terminal mode the TUI is suspended meanwhile
+    fn run_external<B: Backend>(
+        &mut self,
+        terminal: &mut Terminal<B>,
+        cmd: &str,
+        mode: CommandMode,
+    ) -> io::Result<()> {
+        use crossterm::terminal::{
+            disable_raw_mode, enable_raw_mode, Clear, ClearType, EnterAlternateScreen,
+            LeaveAlternateScreen,
+        };
+        use std::process::{Command, Stdio};
+
+        let msg = match mode {
+            CommandMode::Window => {
+                match Command::new("sh")
+                    .arg("-c")
+                    .arg(cmd)
+                    .stdin(Stdio::null())
+                    .stdout(Stdio::null())
+                    .stderr(Stdio::null())
+                    .spawn()
+                {
+                    Ok(_) => "Command started".to_string(),
+                    Err(e) => format!("Command failed: {}", e),
+                }
+            }
+            CommandMode::Terminal => {
+                disable_raw_mode()?;
+                crossterm::execute!(
+                    io::stdout(),
+                    LeaveAlternateScreen,
+                    Clear(ClearType::All),
+                    crossterm::cursor::MoveTo(0, 0),
+                    crossterm::cursor::Show
+                )?;
+                let result = Command::new("sh").arg("-c").arg(cmd).status();
+                enable_raw_mode()?;
+                crossterm::execute!(
+                    io::stdout(),
+                    EnterAlternateScreen,
+                    crossterm::cursor::Hide
+                )?;
+                // discard keystrokes typed while the program was running
+                while event::poll(std::time::Duration::from_millis(0))? {
+                    let _ = event::read()?;
+                }
+                terminal.clear()?;
+                match result {
+                    Ok(st) if st.success() => "Command finished".to_string(),
+                    Ok(st) => format!("Command exited with {}", st),
+                    Err(e) => format!("Command failed: {}", e),
+                }
+            }
+        };
+        self.status_message = Some((msg, Instant::now()));
+        Ok(())
     }
 
     fn handle_key(&mut self, key: event::KeyEvent) -> bool {
@@ -571,6 +679,19 @@ impl TuiApp {
                 return false;
             }
             ActiveDialog::None => {}
+        }
+
+        // User-defined commands
+        if let Some(uc) = self
+            .state
+            .config
+            .commands
+            .iter()
+            .find(|c| c.matches(&key))
+        {
+            let cmd = expand_command(&uc.command, &self.command_context());
+            self.pending_command = Some((cmd, uc.mode));
+            return false;
         }
 
         // Handle Content Viewer Screen
@@ -2560,6 +2681,9 @@ impl TuiApp {
                     add_item(Some("d"), "Show diff (Down vs Up)");
                     add_item(Some("1 - 5"), "Show review for model 1, 2, 3, etc.");
                     add_item(Some("Ctrl+S"), "Save current view to a text file (Viewer)");
+                    for uc in &self.state.config.commands {
+                        add_item(Some(uc.key.as_str()), uc.label());
+                    }
 
                     add_item(None, "Global");
                     add_item(Some("h / ?"), "Toggle this help screen");

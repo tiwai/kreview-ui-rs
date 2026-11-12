@@ -6,6 +6,7 @@ mod git_ops;
 mod models;
 mod state;
 mod ui;
+mod usercmd;
 
 use std::error::Error;
 use std::io;

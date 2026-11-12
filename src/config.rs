@@ -1,4 +1,5 @@
 use crate::models::Severity;
+use crate::usercmd::{validate_key, UserCommand};
 use serde::{Deserialize, Serialize};
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -18,6 +19,7 @@ pub struct Config {
     pub severity: Option<Severity>,
     pub author: Option<String>,
     pub subject: Option<String>,
+    pub commands: Vec<UserCommand>,
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize, Default)]
@@ -35,6 +37,7 @@ pub struct ConfigJson {
     pub severity: Option<String>,
     pub author: Option<String>,
     pub subject: Option<String>,
+    pub commands: Option<Vec<UserCommand>>,
 }
 
 impl Default for Config {
@@ -64,6 +67,7 @@ impl Default for Config {
             severity: None,
             author: None,
             subject: None,
+            commands: Vec::new(),
         }
     }
 }
@@ -180,6 +184,18 @@ impl Config {
             } else {
                 self.subject = Some(subject);
             }
+        }
+        if let Some(commands) = json.commands {
+            self.commands = commands
+                .into_iter()
+                .filter(|c| match validate_key(&c.key) {
+                    Ok(_) => true,
+                    Err(err) => {
+                        eprintln!("Warning: ignoring command {:?}: {}", c.label(), err);
+                        false
+                    }
+                })
+                .collect();
         }
     }
 }

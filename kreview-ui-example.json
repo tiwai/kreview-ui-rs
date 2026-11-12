@@ -11,5 +11,13 @@
   "models": ["qwen3.6", "gpt-oss"],
   "severity": "low",
   "author": "Takashi Iwai",
-  "subject": "ALSA"
+  "subject": "ALSA",
+  "commands": [
+    {
+      "key": "ctrl-r",
+      "name": "Mail review",
+      "command": "some-prog -b %b -c %c -m %m",
+      "mode": "terminal"
+    }
+  ]
 }

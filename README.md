@@ -88,9 +88,22 @@ The program loads configurations automatically. An example JSON structure:
   "models": ["qwen3.6", "gpt-oss"],
   "severity": "low",
   "author": "Takashi Iwai",
-  "subject": "ALSA"
+  "subject": "ALSA",
+  "commands": [
+    {"key": "ctrl-r", "name": "Mail review",
+     "command": "some-prog -b %b -c %c -m %m", "mode": "terminal"}
+  ]
 }
 ```
+
+### User-defined Commands
+`"commands"` binds keys to external programs (main table and viewer):
+- `"key"`: `ctrl-<char>` or `alt-<char>` (Ctrl-A/L/F/B/S are reserved).
+- `"command"`: run via `sh -c`. `%b` = branch, `%c` = downstream commit, `%s` = SUSE (kernel-source) commit, `%u` = upstream commit, `%m` = model, `%%` = `%`. Values are shell-quoted automatically; unavailable values expand to `''`.
+- `"mode"`: `"terminal"` (default) clears the screen, runs the program on the same terminal, and restores the UI afterwards. `"window"` spawns it detached with no terminal attached, so use a command that opens its own window, e.g. `xterm -e prog ...`.
+- `"name"`: optional label shown in the help screen.
+
+In the main table the commit is the selected row and the model is the selected model column (empty on the Subject column). In the viewer they come from the displayed commit and review.
 
 ### Startup Filters
 Default filters can be configured in the JSON config and overridden by CLI flags:
