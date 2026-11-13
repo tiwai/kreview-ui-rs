@@ -1917,17 +1917,21 @@ impl TuiApp {
         let mut header_cells = vec![CellFormat::header("Subject", theme.header_fg)];
         let mut widths = vec![Constraint::Percentage(50)];
 
+        const MIN_MODEL_COL_WIDTH: u16 = 12;
+        const MAX_MODEL_COL_WIDTH: u16 = 20;
+
         for model_id in &self.state.visible_models {
             let desc = models_map
                 .get(model_id)
                 .map(|m| &m.description)
                 .unwrap_or(model_id);
-            let header_str = match desc.char_indices().nth(7) {
+            let col_width = (desc.chars().count() as u16).clamp(MIN_MODEL_COL_WIDTH, MAX_MODEL_COL_WIDTH);
+            let header_str = match desc.char_indices().nth(col_width as usize) {
                 Some((idx, _)) => &desc[..idx],
                 None => desc,
             };
             header_cells.push(CellFormat::header(header_str, theme.header_fg));
-            widths.push(Constraint::Length(12));
+            widths.push(Constraint::Length(col_width));
         }
 
         let header_row = Row::new(header_cells)
@@ -4035,5 +4039,68 @@ mod tests {
         } else {
             panic!("Expected ContentViewer with Downstream Commit title for col 1");
         }
+    }
+
+    #[test]
+    fn test_main_table_model_headers_distinguish_long_names() {
+        let temp_dir = std::env::temp_dir().join(format!(
+            "kreview_test_headers_{}",
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        std::fs::create_dir_all(&temp_dir).unwrap();
+
+        let model1_dir = temp_dir.join("qwen3.8-27b");
+        std::fs::create_dir_all(&model1_dir).unwrap();
+        std::fs::write(model1_dir.join("description"), "Qwen3.8-27B").unwrap();
+
+        let model2_dir = temp_dir.join("qwen3.8-flash-next");
+        std::fs::create_dir_all(&model2_dir).unwrap();
+        std::fs::write(model2_dir.join("description"), "Qwen3.8 Flash Next").unwrap();
+
+        let mut config = Config::default();
+        config.database_path = temp_dir.clone();
+        let mut state = AppState::new(config);
+        state.visible_models = vec![
+            "qwen3.8-27b".to_string(),
+            "qwen3.8-flash-next".to_string(),
+        ];
+
+        let mut app = TuiApp::new(state);
+
+        let backend = ratatui::backend::TestBackend::new(120, 20);
+        let mut terminal = ratatui::Terminal::new(backend).unwrap();
+        terminal
+            .draw(|f| {
+                app.draw(f);
+            })
+            .unwrap();
+
+        let buffer = terminal.backend().buffer();
+        let buffer_text: String = (0..buffer.area.height)
+            .map(|y| {
+                let mut line = String::new();
+                for x in 0..buffer.area.width {
+                    line.push_str(buffer.get(x, y).symbol());
+                }
+                line
+            })
+            .collect::<Vec<_>>()
+            .join("\n");
+
+        assert!(
+            buffer_text.contains("Qwen3.8-27B"),
+            "Buffer should contain 'Qwen3.8-27B', got:\n{}",
+            buffer_text
+        );
+        assert!(
+            buffer_text.contains("Qwen3.8 Flash Next"),
+            "Buffer should contain 'Qwen3.8 Flash Next', got:\n{}",
+            buffer_text
+        );
+
+        let _ = std::fs::remove_dir_all(&temp_dir);
     }
 }
