@@ -289,6 +289,215 @@ impl TuiApp {
         }
     }
 
+    #[allow(dead_code)]
+    pub fn help_dialog_lines_count(&self) -> usize {
+        Self::help_dialog_total_lines(self.state.config.commands.len())
+    }
+
+    pub fn help_dialog_total_lines(commands_len: usize) -> usize {
+        39 + commands_len
+    }
+
+    pub fn get_help_dialog_lines(&self, theme: &ThemeStyles) -> Vec<Line<'static>> {
+        let mut list_lines = Vec::new();
+
+        {
+            let mut add_item = |key: Option<&str>, val: &str| {
+                if let Some(k) = key {
+                    list_lines.push(Line::from(vec![
+                        Span::styled(
+                            format!("  {:15}", k),
+                            Style::default()
+                                .fg(theme.help_key_fg)
+                                .add_modifier(Modifier::BOLD),
+                        ),
+                        Span::styled(" - ", Style::default().fg(theme.help_sep_fg)),
+                        Span::styled(val.to_string(), Style::default()),
+                    ]));
+                } else {
+                    if !list_lines.is_empty() {
+                        list_lines.push(Line::from(""));
+                    }
+                    list_lines.push(Line::from(Span::styled(
+                        format!(" {} ", val),
+                        Style::default()
+                            .fg(theme.selected_fg)
+                            .bg(theme.selected_bg)
+                            .add_modifier(Modifier::BOLD),
+                    )));
+                }
+            };
+
+            add_item(None, "Navigation & Views");
+            add_item(
+                Some("Up/Dn, PgUp/Dn"),
+                "Navigate commits (Table) / Scroll (Viewer)",
+            );
+            add_item(Some("Left / Right"), "Move column selection (Table)");
+            add_item(Some("Home / End"), "Jump to top / bottom");
+            add_item(Some("Enter"), "View downstream commit details");
+            add_item(Some("Esc / q"), "Go back to Main Table (Viewer)");
+
+            add_item(None, "Filtering & Configuration");
+            add_item(Some("Ctrl+A / L"), "Filter by Committer / Severity level");
+            add_item(Some("Ctrl+F / B"), "Search commit subject / Switch branch");
+            add_item(Some("m"), "Toggle visible model columns");
+
+            add_item(None, "Actions & Commits");
+            add_item(Some("x"), "Toggle status (Unread -> Ok -> Bad)");
+            add_item(Some("n"), "Add or edit commit note text");
+            add_item(
+                Some("c / s / u"),
+                "View Downstream / SUSE / Upstream commit",
+            );
+            add_item(Some("d"), "Show diff (Down vs Up)");
+            add_item(Some("1 - 5"), "Show review for model 1, 2, 3, etc.");
+            add_item(Some("Ctrl+S"), "Save current view to a text file (Viewer)");
+            for uc in &self.state.config.commands {
+                add_item(Some(uc.key.as_str()), uc.label());
+            }
+
+            add_item(None, "Global");
+            add_item(Some("h / ?"), "Toggle this help screen");
+            add_item(Some("q"), "Quit application (Table only)");
+        }
+
+        list_lines.push(Line::from(""));
+        list_lines.push(Line::from(Span::styled(
+            " Table Markers & Legend ",
+            Style::default()
+                .fg(theme.selected_fg)
+                .bg(theme.selected_bg)
+                .add_modifier(Modifier::BOLD),
+        )));
+
+        list_lines.push(Line::from(Span::styled(
+            "  [Commit Status]",
+            Style::default()
+                .fg(theme.help_key_fg)
+                .add_modifier(Modifier::BOLD),
+        )));
+        list_lines.push(Line::from(vec![
+            Span::styled("    ⚪             ", Style::default()),
+            Span::styled(" - ", Style::default().fg(theme.help_sep_fg)),
+            Span::raw("Unread (No action taken)"),
+        ]));
+        list_lines.push(Line::from(vec![
+            Span::styled("    ✅             ", Style::default()),
+            Span::styled(" - ", Style::default().fg(theme.help_sep_fg)),
+            Span::raw("Ok (Commit marked as OK)"),
+        ]));
+        list_lines.push(Line::from(vec![
+            Span::styled("    ❌             ", Style::default()),
+            Span::styled(" - ", Style::default().fg(theme.help_sep_fg)),
+            Span::raw("Bad (Commit marked as BAD)"),
+        ]));
+
+        list_lines.push(Line::from(""));
+        list_lines.push(Line::from(Span::styled(
+            "  [Model Review Cells]",
+            Style::default()
+                .fg(theme.help_key_fg)
+                .add_modifier(Modifier::BOLD),
+        )));
+        list_lines.push(Line::from(vec![
+            Span::styled("    0              ", Style::default()),
+            Span::styled(" - ", Style::default().fg(theme.help_sep_fg)),
+            Span::raw("Zero issues found by the model"),
+        ]));
+        list_lines.push(Line::from(vec![
+            Span::styled(
+                "    N              ",
+                Style::default()
+                    .fg(theme.issue_count_fg)
+                    .bg(theme.issue_count_bg)
+                    .add_modifier(Modifier::BOLD),
+            ),
+            Span::styled(" - ", Style::default().fg(theme.help_sep_fg)),
+            Span::raw("Number of issues found (highlighted)"),
+        ]));
+        list_lines.push(Line::from(vec![
+            Span::styled(
+                "    *              ",
+                Style::default()
+                    .fg(theme.pre_verification_fg)
+                    .add_modifier(Modifier::BOLD),
+            ),
+            Span::styled(" - ", Style::default().fg(theme.help_sep_fg)),
+            Span::raw("Pre-verification result available"),
+        ]));
+        list_lines.push(Line::from(vec![
+            Span::styled(
+                "    V              ",
+                Style::default()
+                    .fg(theme.verified_result_fg)
+                    .add_modifier(Modifier::BOLD),
+            ),
+            Span::styled(" - ", Style::default().fg(theme.help_sep_fg)),
+            Span::raw("Verified result available"),
+        ]));
+        list_lines.push(Line::from(vec![
+            Span::styled(
+                "    [N]            ",
+                Style::default()
+                    .fg(theme.findings_downstream_only_fg)
+                    .add_modifier(Modifier::BOLD),
+            ),
+            Span::styled(" - ", Style::default().fg(theme.help_sep_fg)),
+            Span::raw("N downstream-only findings"),
+        ]));
+        list_lines.push(Line::from(vec![
+            Span::styled(
+                "    FN             ",
+                Style::default()
+                    .fg(theme.issue_fixed_fg)
+                    .add_modifier(Modifier::BOLD),
+            ),
+            Span::styled(" - ", Style::default().fg(theme.help_sep_fg)),
+            Span::raw("N issues fixed"),
+        ]));
+        list_lines.push(Line::from(vec![
+            Span::styled(
+                "    L / M / H      ",
+                Style::default().add_modifier(Modifier::BOLD),
+            ),
+            Span::styled(" - ", Style::default().fg(theme.help_sep_fg)),
+            Span::raw("Issue severity: "),
+            Span::styled(
+                "Low (L)",
+                Style::default()
+                    .fg(theme.sev_low)
+                    .add_modifier(Modifier::BOLD),
+            ),
+            Span::raw(", "),
+            Span::styled(
+                "Medium (M)",
+                Style::default()
+                    .fg(theme.sev_med)
+                    .add_modifier(Modifier::BOLD),
+            ),
+            Span::raw(", "),
+            Span::styled(
+                "High (H)",
+                Style::default()
+                    .fg(theme.sev_high)
+                    .add_modifier(Modifier::BOLD),
+            ),
+        ]));
+        list_lines.push(Line::from(vec![
+            Span::styled(
+                "    +              ",
+                Style::default()
+                    .fg(Color::Green)
+                    .add_modifier(Modifier::BOLD),
+            ),
+            Span::styled(" - ", Style::default().fg(theme.help_sep_fg)),
+            Span::raw("Fix patch(es) available"),
+        ]));
+
+        list_lines
+    }
+
     pub fn run<B: Backend>(&mut self, terminal: &mut Terminal<B>) -> io::Result<()> {
         loop {
             terminal.draw(|f| self.draw(f))?;
@@ -420,6 +629,7 @@ impl TuiApp {
     }
 
     fn handle_key(&mut self, key: event::KeyEvent) -> bool {
+        let commands_len = self.state.config.commands.len();
         // If a dialog is active, it intercepts keys
         match &mut self.active_dialog {
             ActiveDialog::CommitterFilter(s) => {
@@ -597,7 +807,7 @@ impl TuiApp {
                         } else {
                             18
                         };
-                        let max_scroll = 38_usize.saturating_sub(inner_height);
+                        let max_scroll = Self::help_dialog_total_lines(commands_len).saturating_sub(inner_height);
                         *scroll_offset = (*scroll_offset + 1).min(max_scroll);
                     }
                     KeyCode::PageUp => {
@@ -610,7 +820,7 @@ impl TuiApp {
                         } else {
                             18
                         };
-                        let max_scroll = 38_usize.saturating_sub(inner_height);
+                        let max_scroll = Self::help_dialog_total_lines(commands_len).saturating_sub(inner_height);
                         *scroll_offset = (*scroll_offset + 5).min(max_scroll);
                     }
                     _ => {}
@@ -2645,192 +2855,7 @@ impl TuiApp {
 
                 f.render_widget(Clear, area);
 
-                let mut list_lines = Vec::new();
-
-                {
-                    // Single helper to add items (headers or bindings)
-                    let mut add_item = |key: Option<&str>, val: &str| {
-                        if let Some(k) = key {
-                            list_lines.push(Line::from(vec![
-                                Span::styled(
-                                    format!("  {:15}", k),
-                                    Style::default()
-                                        .fg(theme.help_key_fg)
-                                        .add_modifier(Modifier::BOLD),
-                                ),
-                                Span::styled(" - ", Style::default().fg(theme.help_sep_fg)),
-                                Span::styled(val.to_string(), Style::default()),
-                            ]));
-                        } else {
-                            if !list_lines.is_empty() {
-                                list_lines.push(Line::from(""));
-                            }
-                            list_lines.push(Line::from(Span::styled(
-                                format!(" {} ", val),
-                                Style::default()
-                                    .fg(theme.selected_fg)
-                                    .bg(theme.selected_bg)
-                                    .add_modifier(Modifier::BOLD),
-                            )));
-                        }
-                    };
-
-                    add_item(None, "Navigation & Views");
-                    add_item(
-                        Some("Up/Dn, PgUp/Dn"),
-                        "Navigate commits (Table) / Scroll (Viewer)",
-                    );
-                    add_item(Some("Left / Right"), "Move column selection (Table)");
-                    add_item(Some("Home / End"), "Jump to top / bottom");
-                    add_item(Some("Enter"), "View downstream commit details");
-                    add_item(Some("Esc / q"), "Go back to Main Table (Viewer)");
-
-                    add_item(None, "Filtering & Configuration");
-                    add_item(Some("Ctrl+A / L"), "Filter by Committer / Severity level");
-                    add_item(Some("Ctrl+F / B"), "Search commit subject / Switch branch");
-                    add_item(Some("m"), "Toggle visible model columns");
-
-                    add_item(None, "Actions & Commits");
-                    add_item(Some("x"), "Toggle status (Unread -> Ok -> Bad)");
-                    add_item(Some("n"), "Add or edit commit note text");
-                    add_item(
-                        Some("c / s / u"),
-                        "View Downstream / SUSE / Upstream commit",
-                    );
-                    add_item(Some("d"), "Show diff (Down vs Up)");
-                    add_item(Some("1 - 5"), "Show review for model 1, 2, 3, etc.");
-                    add_item(Some("Ctrl+S"), "Save current view to a text file (Viewer)");
-                    for uc in &self.state.config.commands {
-                        add_item(Some(uc.key.as_str()), uc.label());
-                    }
-
-                    add_item(None, "Global");
-                    add_item(Some("h / ?"), "Toggle this help screen");
-                    add_item(Some("q"), "Quit application (Table only)");
-                }
-
-                list_lines.push(Line::from(""));
-                list_lines.push(Line::from(Span::styled(
-                    " Table Markers & Legend ",
-                    Style::default()
-                        .fg(theme.selected_fg)
-                        .bg(theme.selected_bg)
-                        .add_modifier(Modifier::BOLD),
-                )));
-
-                list_lines.push(Line::from(Span::styled(
-                    "  [Commit Status]",
-                    Style::default()
-                        .fg(theme.help_key_fg)
-                        .add_modifier(Modifier::BOLD),
-                )));
-                list_lines.push(Line::from(vec![
-                    Span::styled("    ⚪             ", Style::default()),
-                    Span::styled(" - ", Style::default().fg(theme.help_sep_fg)),
-                    Span::raw("Unread (No action taken)"),
-                ]));
-                list_lines.push(Line::from(vec![
-                    Span::styled("    ✅             ", Style::default()),
-                    Span::styled(" - ", Style::default().fg(theme.help_sep_fg)),
-                    Span::raw("Ok (Commit marked as OK)"),
-                ]));
-                list_lines.push(Line::from(vec![
-                    Span::styled("    ❌             ", Style::default()),
-                    Span::styled(" - ", Style::default().fg(theme.help_sep_fg)),
-                    Span::raw("Bad (Commit marked as BAD)"),
-                ]));
-
-                list_lines.push(Line::from(""));
-                list_lines.push(Line::from(Span::styled(
-                    "  [Model Review Cells]",
-                    Style::default()
-                        .fg(theme.help_key_fg)
-                        .add_modifier(Modifier::BOLD),
-                )));
-                list_lines.push(Line::from(vec![
-                    Span::styled("    0              ", Style::default()),
-                    Span::styled(" - ", Style::default().fg(theme.help_sep_fg)),
-                    Span::raw("Zero issues found by the model"),
-                ]));
-                list_lines.push(Line::from(vec![
-                    Span::styled(
-                        "    N              ",
-                        Style::default()
-                            .fg(theme.issue_count_fg)
-                            .bg(theme.issue_count_bg)
-                            .add_modifier(Modifier::BOLD),
-                    ),
-                    Span::styled(" - ", Style::default().fg(theme.help_sep_fg)),
-                    Span::raw("Number of issues found (highlighted)"),
-                ]));
-                list_lines.push(Line::from(vec![
-                    Span::styled(
-                        "    *              ",
-                        Style::default()
-                            .fg(theme.pre_verification_fg)
-                            .add_modifier(Modifier::BOLD),
-                    ),
-                    Span::styled(" - ", Style::default().fg(theme.help_sep_fg)),
-                    Span::raw("Pre-verification result available"),
-                ]));
-                list_lines.push(Line::from(vec![
-                    Span::styled(
-                        "    V              ",
-                        Style::default()
-                            .fg(theme.verified_result_fg)
-                            .add_modifier(Modifier::BOLD),
-                    ),
-                    Span::styled(" - ", Style::default().fg(theme.help_sep_fg)),
-                    Span::raw("Verified result available"),
-                ]));
-                list_lines.push(Line::from(vec![
-                    Span::styled(
-                        "    [N]            ",
-                        Style::default()
-                            .fg(theme.findings_downstream_only_fg)
-                            .add_modifier(Modifier::BOLD),
-                    ),
-                    Span::styled(" - ", Style::default().fg(theme.help_sep_fg)),
-                    Span::raw("N downstream-only findings"),
-                ]));
-                list_lines.push(Line::from(vec![
-                    Span::styled(
-                        "    L / M / H      ",
-                        Style::default().add_modifier(Modifier::BOLD),
-                    ),
-                    Span::styled(" - ", Style::default().fg(theme.help_sep_fg)),
-                    Span::raw("Issue severity: "),
-                    Span::styled(
-                        "Low (L)",
-                        Style::default()
-                            .fg(theme.sev_low)
-                            .add_modifier(Modifier::BOLD),
-                    ),
-                    Span::raw(", "),
-                    Span::styled(
-                        "Medium (M)",
-                        Style::default()
-                            .fg(theme.sev_med)
-                            .add_modifier(Modifier::BOLD),
-                    ),
-                    Span::raw(", "),
-                    Span::styled(
-                        "High (H)",
-                        Style::default()
-                            .fg(theme.sev_high)
-                            .add_modifier(Modifier::BOLD),
-                    ),
-                ]));
-                list_lines.push(Line::from(vec![
-                    Span::styled(
-                        "    +              ",
-                        Style::default()
-                            .fg(Color::Green)
-                            .add_modifier(Modifier::BOLD),
-                    ),
-                    Span::styled(" - ", Style::default().fg(theme.help_sep_fg)),
-                    Span::raw("Fix patch(es) available"),
-                ]));
+                let list_lines = self.get_help_dialog_lines(&theme);
 
                 let inner_height = area.height.saturating_sub(2) as usize;
                 let max_scroll = list_lines.len().saturating_sub(inner_height);
@@ -3103,7 +3128,7 @@ mod tests {
         } else {
             18
         };
-        let max_scroll = 38_usize.saturating_sub(inner_height);
+        let max_scroll = app.help_dialog_lines_count().saturating_sub(inner_height);
 
         // Open help dialog
         let h_key = KeyEvent {
@@ -3168,6 +3193,33 @@ mod tests {
         } else {
             panic!("Expected Help dialog to be active");
         }
+    }
+
+    #[test]
+    fn test_help_dialog_lines_count() {
+        let config = Config::default();
+        let state = AppState::new(config);
+        let app = TuiApp::new(state);
+        let theme = ThemeStyles::new(ColorTheme::Dark);
+        let lines = app.get_help_dialog_lines(&theme);
+        assert_eq!(app.help_dialog_lines_count(), lines.len());
+
+        let all_text = lines
+            .iter()
+            .map(|l| {
+                l.spans
+                    .iter()
+                    .map(|s| s.content.as_ref())
+                    .collect::<Vec<_>>()
+                    .join("")
+            })
+            .collect::<Vec<_>>()
+            .join("\n");
+
+        assert!(all_text.contains("FN"));
+        assert!(all_text.contains("N issues fixed"));
+        assert!(all_text.contains("+"));
+        assert!(all_text.contains("Fix patch(es) available"));
     }
 
     #[test]
