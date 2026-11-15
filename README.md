@@ -14,7 +14,9 @@ A high-performance Terminal UI (TUI) program written in Rust for displaying and 
 - **Commit Notes:** Write, edit, and view multi-line note texts for any commit. Notes are stored under a configurable notes directory (defaulting to `~/.local/kreview-ui/notes`) and are displayed prominently at the beginning of the commit view.
 - **Fixed Issues:** Issues already fixed later in the same branch (DB schema v2) are shown as a green `F<n>` marker; the cell count, severity filter and highlighting use open issues (found − fixed).
 - **Diff View:** Compare downstream and upstream commits to see code differences (commit log excluded) via the `d` key.
-- **AI Fix Patches:** View AI-generated fix patches (indicated by a green `+` next to severity in the main table, and `[patches available]` in the downstream view) by pressing the `p` key inside the individual model review.
+- **Pre-verified Issues:** View findings and backport comparison from pre-verification (`review-pre-verification.json`) via `V` or `P`.
+- **Verified Results:** View findings and re-verification results (`verified-result.json`) via `v`.
+- **AI Fix Patches:** View AI-generated fix patches (indicated by a green `+` next to severity in the main table, and `[patches available]` in the downstream view) by pressing the `p` key.
 - **Multilayer Config Cascading:** Config values merge seamlessly: Command Line Args (`--config <path>`) > User `~/.config/kreview-ui.json` > System `/etc/kreview-ui.json` > Default values.
 - **Keyboard-driven Dialog forms:**
   - `Ctrl+A` Filter by Author
@@ -43,6 +45,9 @@ A high-performance Terminal UI (TUI) program written in Rust for displaying and 
 | `s` | Show SUSE kernel-source commit details |
 | `u` | Show upstream Linux commit details |
 | `d` | Show code-only diff between downstream and upstream commits |
+| `V` / `P` | Show pre-verification result for selected commit and model |
+| `v` | Show verified result for selected commit and model |
+| `p` | Show AI fix patches for selected commit and model |
 | `1` - `5` | Open review for model at column index 1-5 |
 | `h` / `?` | Toggle the Help Overlay screen |
 | `Ctrl+A` | Open **Author Filter** dialog |
@@ -64,6 +69,8 @@ A high-performance Terminal UI (TUI) program written in Rust for displaying and 
 | `s` | Switch to SUSE kernel-source commit details |
 | `u` | Switch to upstream Linux commit details |
 | `d` | Switch to code-only diff between downstream and upstream commits |
+| `V` / `P` | Switch to pre-verification result (when available) |
+| `v` | Switch to verified result (when available) |
 | `p` | Switch to AI fix patches (when viewing an individual model review if patches are available) |
 | `1` - `5` | Switch to inline review for model index 1-5 |
 | `h` / `?` | Toggle the Help Overlay screen |
@@ -148,13 +155,17 @@ cargo build --release
 
 ### Non-interactive usage
 
-Export the rendered plain text of a review or verification result without starting the TUI. The commit SHA (full or abbreviated, at least 4 hex digits; must be unambiguous) and the model ID (its directory name in the database) are required.
+Export the rendered plain text of a review, verified result, or pre-verification without starting the TUI. The commit SHA (full or abbreviated, at least 4 hex digits; must be unambiguous) and the model ID (its directory name in the database) are required.
 
 ```bash
 # Save the review to ./review-<model-description>-<sha12>.txt (same name as Ctrl-S in the TUI)
 kreview-ui --model gemma-4 --save-review <sha>
 
-# Print the verification result to stdout
+# Save or print the pre-verification result
+kreview-ui --model gemma-4 --save-pre-verified <sha> --output -
+kreview-ui --model gemma-4 --save-pre-verified <sha> --output prever.txt
+
+# Print the re-verification result to stdout
 kreview-ui --model gemma-4 --save-verified <sha> --output -
 
 # Save to a given file

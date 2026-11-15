@@ -5,7 +5,7 @@ use std::path::PathBuf;
 use crate::config::Config;
 use crate::database::ReviewDatabase;
 use crate::git_ops::GitViewer;
-use crate::models::{InlineReview, VerifiedResult};
+use crate::models::{InlineReview, PreVerificationResult, VerifiedResult};
 use crate::state::fetch_commit_metadata;
 use crate::ui::{strip_markup, title_to_filename};
 
@@ -15,6 +15,7 @@ const EXPORT_WIDTH: usize = 80;
 pub enum ExportKind {
     Review,
     Verified,
+    PreVerified,
 }
 
 impl ExportKind {
@@ -22,6 +23,7 @@ impl ExportKind {
         match self {
             ExportKind::Review => "Review",
             ExportKind::Verified => "Verified Result",
+            ExportKind::PreVerified => "Pre-verification",
         }
     }
 }
@@ -104,6 +106,20 @@ pub fn render_verified(config: &Config, model_id: &str, sha: &str) -> Result<Str
     }
 }
 
+/// Render the pre-verification result of the given commit & model as plain text.
+pub fn render_pre_verified(config: &Config, model_id: &str, sha: &str) -> Result<String, String> {
+    let db = ReviewDatabase::new(config.database_path.clone());
+    let sha = check_args(&db, model_id, sha)?;
+    let sha = sha.as_str();
+    let json_str = db
+        .get_review_content(model_id, sha, "review-pre-verification.json")
+        .ok_or_else(|| format!("No pre-verification result for {}/{}", model_id, sha))?;
+    match serde_json::from_str::<PreVerificationResult>(&json_str) {
+        Ok(v) => Ok(strip_markup(&v.render_with_width(EXPORT_WIDTH))),
+        Err(e) => Err(format!("Failed to parse review-pre-verification.json: {}", e)),
+    }
+}
+
 /// Export the text to `output` ("-" for stdout); returns a description of the destination.
 pub fn export(
     config: &Config,
@@ -118,6 +134,7 @@ pub fn export(
     let text = match kind {
         ExportKind::Review => render_review(config, model_id, sha)?,
         ExportKind::Verified => render_verified(config, model_id, sha)?,
+        ExportKind::PreVerified => render_pre_verified(config, model_id, sha)?,
     };
     match output {
         Some(p) if p.as_os_str() == "-" => {
@@ -200,6 +217,38 @@ mod tests {
         assert!(render_verified(&config, "test-model", SHA)
             .unwrap_err()
             .contains("No verification"));
+        assert!(render_pre_verified(&config, "test-model", SHA)
+            .unwrap_err()
+            .contains("No pre-verification"));
+
+        // Write a valid review-pre-verification.json and verify export
+        let pre_ver_json = r#"{
+            "upstream_verification": {
+                "upstream_commit": "1111222233334444555566667777888899990000",
+                "findings_in_upstream": 0,
+                "findings_downstream_only": 1
+            },
+            "findings": [
+                {
+                    "category": "TestCat",
+                    "type": "Bug",
+                    "severity": "Medium",
+                    "message": "Export pre-ver test message"
+                }
+            ]
+        }"#;
+        let dir = db.join("test-model").join(&SHA[..2]).join(SHA);
+        std::fs::write(dir.join("review-pre-verification.json"), pre_ver_json).unwrap();
+
+        let text = render_pre_verified(&config, "test-model", SHA).unwrap();
+        assert!(text.contains("Upstream Verification"));
+        assert!(text.contains("Export pre-ver test message"));
+
+        let out = db.join("prever_out.txt");
+        export(&config, ExportKind::PreVerified, "test-model", SHA, Some(&out)).unwrap();
+        let saved_text = std::fs::read_to_string(&out).unwrap();
+        assert!(saved_text.contains("Upstream Verification"));
+
         let _ = std::fs::remove_dir_all(&db);
     }
 }

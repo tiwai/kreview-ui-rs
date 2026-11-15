@@ -13,7 +13,8 @@ use std::time::Instant;
 
 use crate::git_ops::GitViewer;
 use crate::models::{
-    strip_patch_prefix, CommitReview, ReviewMetadata, Severity, Status, VerifiedResult,
+    strip_patch_prefix, CommitReview, PreVerificationResult, ReviewMetadata, Severity, Status,
+    VerifiedResult,
 };
 use crate::state::AppState;
 use crate::usercmd::{expand_command, CommandContext, CommandMode};
@@ -295,7 +296,7 @@ impl TuiApp {
     }
 
     pub fn help_dialog_total_lines(commands_len: usize) -> usize {
-        39 + commands_len
+        42 + commands_len
     }
 
     pub fn get_help_dialog_lines(&self, theme: &ThemeStyles) -> Vec<Line<'static>> {
@@ -352,6 +353,9 @@ impl TuiApp {
             );
             add_item(Some("d"), "Show diff (Down vs Up)");
             add_item(Some("1 - 5"), "Show review for model 1, 2, 3, etc.");
+            add_item(Some("V / P"), "View pre-verification result");
+            add_item(Some("v"), "View verified result");
+            add_item(Some("p"), "View AI fix patches");
             add_item(Some("Ctrl+S"), "Save current view to a text file (Viewer)");
             for uc in &self.state.config.commands {
                 add_item(Some(uc.key.as_str()), uc.label());
@@ -934,6 +938,7 @@ impl TuiApp {
             let mut show_diff = None;
             let mut show_patches: Option<(String, String)> = None;
             let mut show_verified: Option<(String, String)> = None;
+            let mut show_pre_verification: Option<(String, String)> = None;
             let mut show_help = false;
             let mut edit_note = false;
 
@@ -992,19 +997,54 @@ impl TuiApp {
                     }
                 }
                 KeyCode::Char('p') => {
-                    if let (Some(sha), Some(model_id)) = (
-                        s.commit_info.get("downstream_sha").cloned(),
-                        s.commit_info.get("model_id").cloned(),
-                    ) {
-                        show_patches = Some((sha, model_id));
+                    if let Some(sha) = s.commit_info.get("downstream_sha").cloned() {
+                        let model_id = s.commit_info.get("model_id").cloned().or_else(|| {
+                            self.state.commits.iter().find(|c| c.sha == sha).and_then(|c| {
+                                self.state.visible_models.iter().find(|m| {
+                                    c.reviews
+                                        .get(m.as_str())
+                                        .map(|r| r.has_fix_patches)
+                                        .unwrap_or(false)
+                                }).cloned()
+                            })
+                        });
+                        if let Some(model_id) = model_id {
+                            show_patches = Some((sha, model_id));
+                        }
                     }
                 }
                 KeyCode::Char('v') => {
-                    if let (Some(sha), Some(model_id)) = (
-                        s.commit_info.get("downstream_sha").cloned(),
-                        s.commit_info.get("model_id").cloned(),
-                    ) {
-                        show_verified = Some((sha, model_id));
+                    if let Some(sha) = s.commit_info.get("downstream_sha").cloned() {
+                        let model_id = s.commit_info.get("model_id").cloned().or_else(|| {
+                            self.state.commits.iter().find(|c| c.sha == sha).and_then(|c| {
+                                self.state.visible_models.iter().find(|m| {
+                                    c.reviews
+                                        .get(m.as_str())
+                                        .map(|r| r.has_verified_result)
+                                        .unwrap_or(false)
+                                }).cloned()
+                            })
+                        });
+                        if let Some(model_id) = model_id {
+                            show_verified = Some((sha, model_id));
+                        }
+                    }
+                }
+                KeyCode::Char('V') | KeyCode::Char('P') => {
+                    if let Some(sha) = s.commit_info.get("downstream_sha").cloned() {
+                        let model_id = s.commit_info.get("model_id").cloned().or_else(|| {
+                            self.state.commits.iter().find(|c| c.sha == sha).and_then(|c| {
+                                self.state.visible_models.iter().find(|m| {
+                                    c.reviews
+                                        .get(m.as_str())
+                                        .map(|r| r.has_pre_verification)
+                                        .unwrap_or(false)
+                                }).cloned()
+                            })
+                        });
+                        if let Some(model_id) = model_id {
+                            show_pre_verification = Some((sha, model_id));
+                        }
                     }
                 }
                 KeyCode::Char('h') | KeyCode::Char('?') => {
@@ -1088,6 +1128,12 @@ impl TuiApp {
                 let commit_opt = self.state.commits.iter().find(|c| c.sha == sha).cloned();
                 if let Some(commit) = commit_opt {
                     self.action_show_patches_for_model(&commit, &model_id);
+                }
+            } else if let Some((sha, model_id)) = show_pre_verification {
+                let commit_opt = self.state.commits.iter().find(|c| c.sha == sha).cloned();
+                if let Some(commit) = commit_opt {
+                    self.screen_history.push(self.active_screen.clone());
+                    self.action_show_pre_verification(&commit, &model_id);
                 }
             } else if let Some((sha, model_id)) = show_verified {
                 let commit_opt = self.state.commits.iter().find(|c| c.sha == sha).cloned();
@@ -1329,14 +1375,60 @@ impl TuiApp {
                             self.action_show_diff(&commit);
                         }
                     }
+                    KeyCode::Char('p') => {
+                        if let Some(commit) = self.get_selected_commit() {
+                            let model_id = if self.selected_col > 0 {
+                                let model_idx = self.selected_col - 1;
+                                self.state.visible_models.get(model_idx).cloned()
+                            } else {
+                                self.state.visible_models.iter().find(|m| {
+                                    commit
+                                        .reviews
+                                        .get(m.as_str())
+                                        .map(|r| r.has_fix_patches)
+                                        .unwrap_or(false)
+                                }).cloned()
+                            };
+                            if let Some(model_id) = model_id {
+                                self.action_show_patches_for_model(&commit, &model_id);
+                            }
+                        }
+                    }
                     KeyCode::Char('v') => {
                         if let Some(commit) = self.get_selected_commit() {
-                            if self.selected_col > 0 {
+                            let model_id = if self.selected_col > 0 {
                                 let model_idx = self.selected_col - 1;
-                                if model_idx < self.state.visible_models.len() {
-                                    let model_id = self.state.visible_models[model_idx].clone();
-                                    self.action_show_verified_result(&commit, &model_id);
-                                }
+                                self.state.visible_models.get(model_idx).cloned()
+                            } else {
+                                self.state.visible_models.iter().find(|m| {
+                                    commit
+                                        .reviews
+                                        .get(m.as_str())
+                                        .map(|r| r.has_verified_result)
+                                        .unwrap_or(false)
+                                }).cloned()
+                            };
+                            if let Some(model_id) = model_id {
+                                self.action_show_verified_result(&commit, &model_id);
+                            }
+                        }
+                    }
+                    KeyCode::Char('V') | KeyCode::Char('P') => {
+                        if let Some(commit) = self.get_selected_commit() {
+                            let model_id = if self.selected_col > 0 {
+                                let model_idx = self.selected_col - 1;
+                                self.state.visible_models.get(model_idx).cloned()
+                            } else {
+                                self.state.visible_models.iter().find(|m| {
+                                    commit
+                                        .reviews
+                                        .get(m.as_str())
+                                        .map(|r| r.has_pre_verification)
+                                        .unwrap_or(false)
+                                }).cloned()
+                            };
+                            if let Some(model_id) = model_id {
+                                self.action_show_pre_verification(&commit, &model_id);
                             }
                         }
                     }
@@ -1837,6 +1929,73 @@ impl TuiApp {
         ));
     }
 
+    fn action_show_pre_verification(&mut self, commit: &CommitReview, model_id: &str) {
+        let Some(review) = commit.reviews.get(model_id) else {
+            return;
+        };
+        if !review.has_pre_verification {
+            return;
+        }
+        let Some(json_str) =
+            self.state
+                .db
+                .get_review_content(model_id, &commit.sha, "review-pre-verification.json")
+        else {
+            return;
+        };
+        let pre_ver_res = serde_json::from_str::<PreVerificationResult>(&json_str);
+
+        let width = if let Ok((cols, _)) = crossterm::terminal::size() {
+            (cols.saturating_sub(2) as usize).max(40)
+        } else {
+            80
+        };
+
+        let (content, warnings) = match pre_ver_res {
+            Ok(pre_ver) => {
+                let warnings = pre_ver.warnings.clone();
+                (pre_ver.render_with_width(width), warnings)
+            }
+            Err(e) => {
+                let content = format!(
+                    "=== Warning: Failed to parse review-pre-verification.json ===\nError: {}\n\n=== Raw Content ===\n{}",
+                    e, json_str
+                );
+                (content, vec![format!("Failed to parse JSON: {}", e)])
+            }
+        };
+
+        if !warnings.is_empty() {
+            self.status_message = Some((
+                format!("Warning: {}", warnings.join(", ")),
+                Instant::now(),
+            ));
+        }
+
+        let models_map = self.state.db.load_models();
+        let name = models_map
+            .get(model_id)
+            .map(|m| m.description.as_str())
+            .unwrap_or(model_id);
+
+        let mut commit_info = HashMap::new();
+        commit_info.insert("downstream_sha".to_string(), commit.sha.clone());
+        commit_info.insert("model_id".to_string(), model_id.to_string());
+        if let Some(ref suse) = commit.suse_commit {
+            commit_info.insert("suse_sha".to_string(), suse.clone());
+        }
+        if let Some(ref upstream) = commit.upstream_commit {
+            commit_info.insert("upstream_sha".to_string(), upstream.clone());
+        }
+
+        self.active_screen = ActiveScreen::ContentViewer(ContentViewerState::new_with_info(
+            content,
+            format!("Pre-verification: {} - {}", name, &commit.sha[..12]),
+            false,
+            commit_info,
+        ));
+    }
+
     fn get_rendered_review_details(
         &self,
         model_id: &str,
@@ -1881,11 +2040,18 @@ impl TuiApp {
                 if let Some((mut content, source_json, diff_content, rendered_width)) =
                     self.get_rendered_review_details(model_id, commit)
                 {
+                    let mut banners = String::new();
+                    if review.has_pre_verification {
+                        banners.push_str("Pre-verification: AVAILABLE (Press 'V' to view)\n\n");
+                    }
+                    if review.has_verified_result {
+                        banners.push_str("Verified Result: AVAILABLE (Press 'v' to view)\n\n");
+                    }
                     if review.has_fix_patches {
-                        content = format!(
-                            "AI Fix Patches: AVAILABLE (Press 'p' to view)\n\n{}",
-                            content
-                        );
+                        banners.push_str("AI Fix Patches: AVAILABLE (Press 'p' to view)\n\n");
+                    }
+                    if !banners.is_empty() {
+                        content = format!("{}{}", banners, content);
                     }
                     let models_map = self.state.db.load_models();
                     let name = models_map
@@ -1937,11 +2103,18 @@ impl TuiApp {
                 if let Some((mut content, source_json, diff_content, rendered_width)) =
                     self.get_rendered_review_details(model_id, &commit)
                 {
+                    let mut banners = String::new();
+                    if review.has_pre_verification {
+                        banners.push_str("Pre-verification: AVAILABLE (Press 'V' to view)\n\n");
+                    }
+                    if review.has_verified_result {
+                        banners.push_str("Verified Result: AVAILABLE (Press 'v' to view)\n\n");
+                    }
                     if review.has_fix_patches {
-                        content = format!(
-                            "AI Fix Patches: AVAILABLE (Press 'p' to view)\n\n{}",
-                            content
-                        );
+                        banners.push_str("AI Fix Patches: AVAILABLE (Press 'p' to view)\n\n");
+                    }
+                    if !banners.is_empty() {
+                        content = format!("{}{}", banners, content);
                     }
                     let models_map = self.state.db.load_models();
                     let name = models_map
@@ -1976,10 +2149,16 @@ impl TuiApp {
     }
 
     fn save_content_to_file(s: &ContentViewerState) -> io::Result<String> {
-        let raw = s
-            .content
-            .strip_prefix("AI Fix Patches: AVAILABLE (Press 'p' to view)\n\n")
-            .unwrap_or(&s.content);
+        let mut raw = s.content.as_str();
+        if let Some(rest) = raw.strip_prefix("Pre-verification: AVAILABLE (Press 'V' to view)\n\n") {
+            raw = rest;
+        }
+        if let Some(rest) = raw.strip_prefix("Verified Result: AVAILABLE (Press 'v' to view)\n\n") {
+            raw = rest;
+        }
+        if let Some(rest) = raw.strip_prefix("AI Fix Patches: AVAILABLE (Press 'p' to view)\n\n") {
+            raw = rest;
+        }
         let plain = strip_markup(raw);
 
         let filename = title_to_filename(&s.title);
@@ -2058,14 +2237,17 @@ impl TuiApp {
                             serde_json::from_str::<crate::models::InlineReview>(json_str)
                         {
                             let content = inline_review.render_with_width(Some(diff), target_width);
-                            let content = if s.content.starts_with("AI Fix Patches: AVAILABLE") {
-                                format!(
-                                    "AI Fix Patches: AVAILABLE (Press 'p' to view)\n\n{}",
-                                    content
-                                )
-                            } else {
-                                content
-                            };
+                            let mut prefix = String::new();
+                            if s.content.contains("Pre-verification: AVAILABLE (Press 'V' to view)\n\n") {
+                                prefix.push_str("Pre-verification: AVAILABLE (Press 'V' to view)\n\n");
+                            }
+                            if s.content.contains("Verified Result: AVAILABLE (Press 'v' to view)\n\n") {
+                                prefix.push_str("Verified Result: AVAILABLE (Press 'v' to view)\n\n");
+                            }
+                            if s.content.contains("AI Fix Patches: AVAILABLE (Press 'p' to view)\n\n") {
+                                prefix.push_str("AI Fix Patches: AVAILABLE (Press 'p' to view)\n\n");
+                            }
+                            let content = format!("{}{}", prefix, content);
                             s.content = content.clone();
                             s.lines = content
                                 .lines()
@@ -2100,10 +2282,10 @@ impl TuiApp {
         // Footer
         let default_footer: &str = match self.active_screen {
             ActiveScreen::MainTable => {
-                "h/?: Help | Enter: Cell Action | x: Toggle status | c: Downstream | s: SUSE | u: Upstream | d: Diff | 1-3: Review | Ctrl+A: Committer | Ctrl+L: Severity | Ctrl+F: Search | Ctrl+B: Branch | o: Open only | m: Models | q: Quit"
+                "h/?: Help | Enter: Cell Action | x: Toggle status | c: Downstream | s: SUSE | u: Upstream | d: Diff | 1-5: Review | V/P: Pre-verified | v: Verified | p: Patches | q: Quit"
             }
             ActiveScreen::ContentViewer(_) => {
-                "h/?: Help | Esc/q: Back | Ctrl+S: Save | c: Downstream | s: SUSE | u: Upstream | d: Diff | p: Patches | v: Verified | 1-3: Review | Up/Down/Left/Right: Scroll"
+                "h/?: Help | Esc/q: Back | Ctrl+S: Save | c: Downstream | s: SUSE | u: Upstream | d: Diff | V/P: Pre-verified | v: Verified | p: Patches | 1-5: Review | Up/Down/Left/Right: Scroll"
             }
         };
         let footer_text: &str = if let Some((ref msg, _)) = self.status_message {
@@ -2555,12 +2737,17 @@ impl TuiApp {
                     // Highlight metadata tags in reviews
                     let tags = [
                         "suse-commit:",
+                        "SUSE-commit:",
                         "distro-commit:",
                         "Git-commit:",
                         "Verified-against:",
+                        "Upstream-commit:",
                         "Upstream-subject:",
+                        "Potential-issues-found:",
                         "Findings-in-upstream:",
                         "Findings-downstream-only:",
+                        "Differences-found:",
+                        "Needs-deep-review:",
                         "Review-time:",
                         "Review-model:",
                         "Re-verification-model:",
@@ -2573,10 +2760,13 @@ impl TuiApp {
                         "Type:",
                         "Severity:",
                         "Confidence:",
+                        "Location:",
                         "Upstream-status:",
+                        "Fix-status:",
                         "Verification-status:",
                         "Verification-comment:",
                         "Message:",
+                        "Description:",
                         "Evidence:",
                     ];
 
@@ -2593,9 +2783,11 @@ impl TuiApp {
                         let after = &line[idx + tag.len()..];
 
                         let is_sha_tag = tag == "suse-commit:"
+                            || tag == "SUSE-commit:"
                             || tag == "distro-commit:"
                             || tag == "Git-commit:"
-                            || tag == "Verified-against:";
+                            || tag == "Verified-against:"
+                            || tag == "Upstream-commit:";
                         let after_span = if is_sha_tag {
                             Span::styled(
                                 after.to_string(),
@@ -4286,6 +4478,124 @@ mod tests {
             "Subject column width must be at least 30, got {}",
             pos1 - pos_subject
         );
+
+        let _ = std::fs::remove_dir_all(&temp_dir);
+    }
+
+    #[test]
+    fn test_pre_verification_tui_keybinding_and_viewer() {
+        let temp_dir = std::env::temp_dir().join(format!("kreview_test_prever_{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&temp_dir);
+        let model_dir = temp_dir.join("test_model").join("ab");
+        std::fs::create_dir_all(&model_dir).unwrap();
+
+        let sha = "abcdef1234567890abcdef1234567890abcdef12";
+        let commit_dir = model_dir.join(sha);
+        std::fs::create_dir_all(&commit_dir).unwrap();
+
+        let pre_ver_json = r#"{
+            "upstream_verification": {
+                "upstream_commit": "1111222233334444555566667777888899990000",
+                "upstream_subject": "Upstream fix commit",
+                "findings_in_upstream": 1,
+                "findings_downstream_only": 1
+            },
+            "findings": [
+                {
+                    "category": "PreCheck",
+                    "type": "Logic",
+                    "severity": "High",
+                    "upstream_status": "present",
+                    "message": "Potential null dereference downstream"
+                }
+            ]
+        }"#;
+        std::fs::write(commit_dir.join("review-pre-verification.json"), pre_ver_json).unwrap();
+
+        std::fs::write(commit_dir.join("review-inline.txt"), "Sample inline review text\n").unwrap();
+
+        let mut config = Config::default();
+        config.database_path = temp_dir.clone();
+        let mut state = AppState::new(config);
+        state.visible_models = vec!["test_model".to_string()];
+
+        let mut reviews = HashMap::new();
+        reviews.insert(
+            "test_model".to_string(),
+            ReviewMetadata {
+                issues_found: 1,
+                issues_fixed: 0,
+                issue_severity_score: Severity::High,
+                issue_severity_explanation: String::new(),
+                sha: sha.to_string(),
+                author: String::new(),
+                subject: String::new(),
+                model: "test_model".to_string(),
+                review_time_seconds: 5.0,
+                input_tokens: 100,
+                output_tokens: 50,
+                total_tokens: 150,
+                suse_commit: None,
+                upstream_commit: Some("1111222233334444555566667777888899990000".to_string()),
+                has_pre_verification: true,
+                has_verified_result: false,
+                findings_downstream_only: 1,
+                has_fix_patches: false,
+            },
+        );
+
+        let commit = CommitReview {
+            sha: sha.to_string(),
+            subject: "Fix issue in driver".to_string(),
+            author: "Dev".to_string(),
+            committer: "Dev".to_string(),
+            suse_commit: None,
+            upstream_commit: Some("1111222233334444555566667777888899990000".to_string()),
+            reviews,
+            status: Status::Unread,
+        };
+
+        state.commits = vec![commit.clone()];
+        state.filtered_commits = vec![commit];
+
+        let mut app = TuiApp::new(state);
+
+        // 1. Press 'V' on MainTable (selected_col == 0) -> Opens Pre-verification
+        app.handle_key(crossterm::event::KeyEvent::from(KeyCode::Char('V')));
+        match &app.active_screen {
+            ActiveScreen::ContentViewer(s) => {
+                assert!(s.title.contains("Pre-verification"));
+                assert!(s.content.contains("Upstream Verification"));
+                assert!(s.content.contains("Upstream fix commit"));
+                assert!(s.content.contains("Potential null dereference downstream"));
+            }
+            _ => panic!("Expected ContentViewer screen for Pre-verification"),
+        }
+
+        // 2. Press Esc to return to MainTable
+        app.handle_key(crossterm::event::KeyEvent::from(KeyCode::Esc));
+        assert!(matches!(app.active_screen, ActiveScreen::MainTable));
+
+        // 3. Open review for model (key '1')
+        app.handle_key(crossterm::event::KeyEvent::from(KeyCode::Char('1')));
+        match &app.active_screen {
+            ActiveScreen::ContentViewer(s) => {
+                assert!(s.title.contains("Review:"));
+                // Verify banner is present
+                assert!(s.content.contains("Pre-verification: AVAILABLE (Press 'V' to view)"));
+            }
+            _ => panic!("Expected ContentViewer screen for Review"),
+        }
+
+        // 4. From within review ContentViewer, press 'V' to navigate directly to Pre-verification
+        app.handle_key(crossterm::event::KeyEvent::from(KeyCode::Char('V')));
+        match &app.active_screen {
+            ActiveScreen::ContentViewer(s) => {
+                assert!(s.title.contains("Pre-verification"));
+                assert!(s.content.contains("Upstream Verification"));
+            }
+            _ => panic!("Expected ContentViewer screen for Pre-verification after pressing V"),
+        }
 
         let _ = std::fs::remove_dir_all(&temp_dir);
     }

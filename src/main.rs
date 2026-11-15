@@ -84,7 +84,7 @@ struct Args {
         long,
         value_name = "SHA",
         requires = "model",
-        conflicts_with = "save_verified",
+        conflicts_with_all = ["save_verified", "save_pre_verified"],
         help = "Save the review text of the commit (non-interactive; needs --model)"
     )]
     save_review: Option<String>,
@@ -93,17 +93,27 @@ struct Args {
         long,
         value_name = "SHA",
         requires = "model",
+        conflicts_with = "save_pre_verified",
         help = "Save the verification result text of the commit (non-interactive; needs --model)"
     )]
     save_verified: Option<String>,
 
-    #[arg(long, help = "Model ID for --save-review / --save-verified")]
+    #[arg(
+        long,
+        alias = "save-preverified",
+        value_name = "SHA",
+        requires = "model",
+        help = "Save the pre-verification result text of the commit (non-interactive; needs --model)"
+    )]
+    save_pre_verified: Option<String>,
+
+    #[arg(long, help = "Model ID for --save-review / --save-verified / --save-pre-verified")]
     model: Option<String>,
 
     #[arg(
         long,
         value_name = "PATH",
-        help = "Output file for --save-review / --save-verified ('-' for stdout)"
+        help = "Output file for --save-review / --save-verified / --save-pre-verified ('-' for stdout)"
     )]
     output: Option<PathBuf>,
 }
@@ -192,9 +202,10 @@ fn main() -> Result<(), Box<dyn Error>> {
     }
 
     // Non-interactive export operations
-    let export_req = match (&args.save_review, &args.save_verified) {
-        (Some(sha), _) => Some((export::ExportKind::Review, sha.clone())),
-        (None, Some(sha)) => Some((export::ExportKind::Verified, sha.clone())),
+    let export_req = match (&args.save_review, &args.save_verified, &args.save_pre_verified) {
+        (Some(sha), _, _) => Some((export::ExportKind::Review, sha.clone())),
+        (None, Some(sha), _) => Some((export::ExportKind::Verified, sha.clone())),
+        (None, None, Some(sha)) => Some((export::ExportKind::PreVerified, sha.clone())),
         _ => None,
     };
     if let (Some((kind, sha)), Some(model)) = (export_req, args.model.as_deref()) {
@@ -360,6 +371,27 @@ mod tests {
         assert!(Args::try_parse_from([
             "kreview-ui",
             "--save-review",
+            "a",
+            "--save-verified",
+            "b",
+            "--model",
+            "m",
+        ])
+        .is_err());
+
+        let args = Args::try_parse_from([
+            "kreview-ui",
+            "--save-pre-verified",
+            "abc",
+            "--model",
+            "m",
+        ])
+        .unwrap();
+        assert_eq!(args.save_pre_verified.as_deref(), Some("abc"));
+
+        assert!(Args::try_parse_from([
+            "kreview-ui",
+            "--save-pre-verified",
             "a",
             "--save-verified",
             "b",
