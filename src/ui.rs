@@ -2633,6 +2633,208 @@ impl TuiApp {
         Line::from(spans)
     }
 
+    pub(crate) fn format_review_line(line: &str, theme: &ThemeStyles) -> Line<'static> {
+        if line.starts_with('>') {
+            let rest = if line.len() > 1 { &line[1..] } else { "" };
+            let rest_trimmed = rest.trim_start();
+
+            if rest_trimmed.starts_with('+') && !rest_trimmed.starts_with("+++") {
+                Line::from(vec![
+                    Span::styled("> ", Style::default().fg(theme.help_sep_fg)),
+                    Span::styled(rest.to_string(), Style::default().fg(theme.diff_add_fg)),
+                ])
+            } else if rest_trimmed.starts_with('-') && !rest_trimmed.starts_with("---") {
+                Line::from(vec![
+                    Span::styled("> ", Style::default().fg(theme.help_sep_fg)),
+                    Span::styled(rest.to_string(), Style::default().fg(theme.diff_del_fg)),
+                ])
+            } else if rest_trimmed.starts_with("@@") {
+                Line::from(vec![
+                    Span::styled("> ", Style::default().fg(theme.help_sep_fg)),
+                    Span::styled(rest.to_string(), Style::default().fg(theme.diff_hunk_fg)),
+                ])
+            } else if rest_trimmed.starts_with("diff ")
+                || rest_trimmed.starts_with("index ")
+                || rest_trimmed.starts_with("---")
+                || rest_trimmed.starts_with("+++")
+            {
+                Line::from(vec![
+                    Span::styled("> ", Style::default().fg(theme.help_sep_fg)),
+                    Span::styled(rest.to_string(), Style::default().fg(theme.diff_meta_fg)),
+                ])
+            } else {
+                Line::from(vec![
+                    Span::styled("> ", Style::default().fg(theme.help_sep_fg)),
+                    Span::raw(rest.to_string()),
+                ])
+            }
+        } else {
+            // Highlight metadata tags in reviews
+            let tags = [
+                "suse-commit:",
+                "SUSE-commit:",
+                "distro-commit:",
+                "Distro-commit:",
+                "Git-commit:",
+                "Verified-against:",
+                "Upstream-commit:",
+                "Upstream-subject:",
+                "Upstream-status:",
+                "Upstream-note:",
+                "Potential-issues-found:",
+                "Findings-in-upstream:",
+                "Findings-downstream-only:",
+                "Total-findings-before-verification:",
+                "Confirmed-findings:",
+                "Pruned-findings-count:",
+                "Differences-found:",
+                "Needs-deep-review:",
+                "Review-time:",
+                "Review-model:",
+                "Re-verification-model:",
+                "Re-verified-by:",
+                "Re-verified-date:",
+                "Verifier-model:",
+                "Input-tokens:",
+                "Output-tokens:",
+                "Total-tokens:",
+                "Issues-found:",
+                "Issues-fixed:",
+                "Backport-status:",
+                "Backport-upstream:",
+                "Category:",
+                "Type:",
+                "Severity:",
+                "Confidence:",
+                "Location:",
+                "Fix-status:",
+                "Future-fix:",
+                "Verification-status:",
+                "Verification-comment:",
+                "Verdict:",
+                "Verified:",
+                "Schema-version:",
+                "Author:",
+                "Committer:",
+                "Subject:",
+                "Summary:",
+                "Message:",
+                "Description:",
+                "Evidence:",
+                "Model:",
+            ];
+
+            let mut matched_tag = None;
+            for tag in &tags {
+                if let Some(idx) = line.find(tag) {
+                    if idx == 0 || line[..idx].chars().all(|c| c.is_whitespace() || c == '*') {
+                        matched_tag = Some((*tag, idx));
+                        break;
+                    }
+                }
+            }
+
+            if let Some((tag, idx)) = matched_tag {
+                let before = &line[..idx];
+                let after = &line[idx + tag.len()..];
+
+                let is_sha_tag = tag == "suse-commit:"
+                    || tag == "SUSE-commit:"
+                    || tag == "distro-commit:"
+                    || tag == "Distro-commit:"
+                    || tag == "Git-commit:"
+                    || tag == "Verified-against:"
+                    || tag == "Upstream-commit:"
+                    || tag == "Backport-upstream:";
+                let after_span = if is_sha_tag {
+                    Span::styled(
+                        after.to_string(),
+                        Style::default()
+                            .fg(theme.findings_downstream_only_fg)
+                            .add_modifier(Modifier::UNDERLINED)
+                            .add_modifier(Modifier::BOLD),
+                    )
+                } else if tag == "Severity:" {
+                    let val_trimmed = after.trim().to_lowercase();
+                    let sev_color = if val_trimmed == "high" {
+                        theme.sev_high
+                    } else if val_trimmed == "medium" {
+                        theme.sev_med
+                    } else if val_trimmed == "low" {
+                        theme.sev_low
+                    } else {
+                        theme.default_text_fg
+                    };
+                    Span::styled(
+                        after.to_string(),
+                        Style::default().fg(sev_color).add_modifier(Modifier::BOLD),
+                    )
+                } else if tag == "Verification-status:" {
+                    let val_trimmed = after.trim().to_lowercase();
+                    let color = if val_trimmed == "confirmed" {
+                        theme.sev_high
+                    } else if val_trimmed == "false-positive" || val_trimmed == "rejected" {
+                        theme.diff_add_fg
+                    } else {
+                        theme.default_text_fg
+                    };
+                    Span::styled(
+                        after.to_string(),
+                        Style::default().fg(color).add_modifier(Modifier::BOLD),
+                    )
+                } else {
+                    Span::styled(
+                        after.to_string(),
+                        Style::default().add_modifier(Modifier::BOLD),
+                    )
+                };
+
+                Line::from(vec![
+                    Span::raw(before.to_string()),
+                    Span::styled(
+                        tag.to_string(),
+                        Style::default()
+                            .fg(theme.diff_hunk_fg)
+                            .add_modifier(Modifier::BOLD),
+                    ),
+                    after_span,
+                ])
+            } else if line.starts_with("commit ") {
+                Line::from(vec![
+                    Span::styled(
+                        "commit ",
+                        Style::default()
+                            .fg(theme.diff_hunk_fg)
+                            .add_modifier(Modifier::BOLD),
+                    ),
+                    Span::styled(
+                        (&line[7..]).to_string(),
+                        Style::default()
+                            .fg(theme.findings_downstream_only_fg)
+                            .add_modifier(Modifier::UNDERLINED)
+                            .add_modifier(Modifier::BOLD),
+                    ),
+                ])
+            } else if line.starts_with("* duplicate ") || line.starts_with("=== Warnings ===") {
+                Line::from(Span::styled(
+                    line.to_string(),
+                    Style::default()
+                        .fg(theme.sev_med)
+                        .add_modifier(Modifier::BOLD),
+                ))
+            } else if line.starts_with("=== ") && line.ends_with(" ===") {
+                Line::from(Span::styled(
+                    line.to_string(),
+                    Style::default()
+                        .fg(theme.subtitle_fg)
+                        .add_modifier(Modifier::BOLD),
+                ))
+            } else {
+                Line::from(line.to_string())
+            }
+        }
+    }
+
     fn draw_content_viewer(&self, f: &mut Frame, area: Rect, s: &ContentViewerState) {
         let theme_type = self.theme();
         let theme = ThemeStyles::new(theme_type);
@@ -2699,182 +2901,7 @@ impl TuiApp {
                 // Style as downstream summary using our tag parser
                 text_lines.push(Self::parse_downstream_summary_line(line, &theme));
             } else {
-                if line.starts_with('>') {
-                    let rest = if line.len() > 1 { &line[1..] } else { "" };
-                    let rest_trimmed = rest.trim_start();
-
-                    if rest_trimmed.starts_with('+') && !rest_trimmed.starts_with("+++") {
-                        text_lines.push(Line::from(vec![
-                            Span::styled("> ", Style::default().fg(theme.help_sep_fg)),
-                            Span::styled(rest.to_string(), Style::default().fg(theme.diff_add_fg)),
-                        ]));
-                    } else if rest_trimmed.starts_with('-') && !rest_trimmed.starts_with("---") {
-                        text_lines.push(Line::from(vec![
-                            Span::styled("> ", Style::default().fg(theme.help_sep_fg)),
-                            Span::styled(rest.to_string(), Style::default().fg(theme.diff_del_fg)),
-                        ]));
-                    } else if rest_trimmed.starts_with("@@") {
-                        text_lines.push(Line::from(vec![
-                            Span::styled("> ", Style::default().fg(theme.help_sep_fg)),
-                            Span::styled(rest.to_string(), Style::default().fg(theme.diff_hunk_fg)),
-                        ]));
-                    } else if rest_trimmed.starts_with("diff ")
-                        || rest_trimmed.starts_with("index ")
-                        || rest_trimmed.starts_with("---")
-                        || rest_trimmed.starts_with("+++")
-                    {
-                        text_lines.push(Line::from(vec![
-                            Span::styled("> ", Style::default().fg(theme.help_sep_fg)),
-                            Span::styled(rest.to_string(), Style::default().fg(theme.diff_meta_fg)),
-                        ]));
-                    } else {
-                        text_lines.push(Line::from(vec![
-                            Span::styled("> ", Style::default().fg(theme.help_sep_fg)),
-                            Span::raw(rest.to_string()),
-                        ]));
-                    }
-                } else {
-                    // Highlight metadata tags in reviews
-                    let tags = [
-                        "suse-commit:",
-                        "SUSE-commit:",
-                        "distro-commit:",
-                        "Git-commit:",
-                        "Verified-against:",
-                        "Upstream-commit:",
-                        "Upstream-subject:",
-                        "Potential-issues-found:",
-                        "Findings-in-upstream:",
-                        "Findings-downstream-only:",
-                        "Differences-found:",
-                        "Needs-deep-review:",
-                        "Review-time:",
-                        "Review-model:",
-                        "Re-verification-model:",
-                        "Re-verified-by:",
-                        "Re-verified-date:",
-                        "Input-tokens:",
-                        "Output-tokens:",
-                        "Total-tokens:",
-                        "Category:",
-                        "Type:",
-                        "Severity:",
-                        "Confidence:",
-                        "Location:",
-                        "Upstream-status:",
-                        "Fix-status:",
-                        "Verification-status:",
-                        "Verification-comment:",
-                        "Message:",
-                        "Description:",
-                        "Evidence:",
-                    ];
-
-                    let mut matched_tag = None;
-                    for tag in &tags {
-                        if let Some(idx) = line.find(tag) {
-                            matched_tag = Some((*tag, idx));
-                            break;
-                        }
-                    }
-
-                    if let Some((tag, idx)) = matched_tag {
-                        let before = &line[..idx];
-                        let after = &line[idx + tag.len()..];
-
-                        let is_sha_tag = tag == "suse-commit:"
-                            || tag == "SUSE-commit:"
-                            || tag == "distro-commit:"
-                            || tag == "Git-commit:"
-                            || tag == "Verified-against:"
-                            || tag == "Upstream-commit:";
-                        let after_span = if is_sha_tag {
-                            Span::styled(
-                                after.to_string(),
-                                Style::default()
-                                    .fg(theme.findings_downstream_only_fg)
-                                    .add_modifier(Modifier::UNDERLINED)
-                                    .add_modifier(Modifier::BOLD),
-                            )
-                        } else if tag == "Severity:" {
-                            let val_trimmed = after.trim().to_lowercase();
-                            let sev_color = if val_trimmed == "high" {
-                                theme.sev_high
-                            } else if val_trimmed == "medium" {
-                                theme.sev_med
-                            } else if val_trimmed == "low" {
-                                theme.sev_low
-                            } else {
-                                theme.default_text_fg
-                            };
-                            Span::styled(
-                                after.to_string(),
-                                Style::default().fg(sev_color).add_modifier(Modifier::BOLD),
-                            )
-                        } else if tag == "Verification-status:" {
-                            let val_trimmed = after.trim().to_lowercase();
-                            let color = if val_trimmed == "confirmed" {
-                                theme.sev_high
-                            } else if val_trimmed == "false-positive" || val_trimmed == "rejected" {
-                                theme.diff_add_fg
-                            } else {
-                                theme.default_text_fg
-                            };
-                            Span::styled(
-                                after.to_string(),
-                                Style::default().fg(color).add_modifier(Modifier::BOLD),
-                            )
-                        } else {
-                            Span::styled(
-                                after.to_string(),
-                                Style::default().add_modifier(Modifier::BOLD),
-                            )
-                        };
-
-                        text_lines.push(Line::from(vec![
-                            Span::raw(before.to_string()),
-                            Span::styled(
-                                tag.to_string(),
-                                Style::default()
-                                    .fg(theme.diff_hunk_fg)
-                                    .add_modifier(Modifier::BOLD),
-                            ),
-                            after_span,
-                        ]));
-                    } else if line.starts_with("commit ") {
-                        text_lines.push(Line::from(vec![
-                            Span::styled(
-                                "commit ",
-                                Style::default()
-                                    .fg(theme.diff_hunk_fg)
-                                    .add_modifier(Modifier::BOLD),
-                            ),
-                            Span::styled(
-                                (&line[7..]).to_string(),
-                                Style::default()
-                                    .fg(theme.findings_downstream_only_fg)
-                                    .add_modifier(Modifier::UNDERLINED)
-                                    .add_modifier(Modifier::BOLD),
-                            ),
-                        ]));
-                    } else if line.starts_with("* duplicate ") || line.starts_with("=== Warnings ===") {
-                        text_lines.push(Line::from(Span::styled(
-                            line.as_str().to_string(),
-                            Style::default()
-                                .fg(theme.sev_med)
-                                .add_modifier(Modifier::BOLD),
-                        )));
-                    } else if line.starts_with("=== ") && line.ends_with(" ===") {
-                        text_lines.push(Line::from(Span::styled(
-                            line.as_str().to_string(),
-                            Style::default()
-                                .fg(theme.subtitle_fg)
-                                .add_modifier(Modifier::BOLD),
-                        )));
-                    } else {
-                        text_lines.push(Line::from(line.as_str()));
-                    }
-                }
+                text_lines.push(Self::format_review_line(line, &theme));
             }
         }
 
@@ -4598,5 +4625,44 @@ mod tests {
         }
 
         let _ = std::fs::remove_dir_all(&temp_dir);
+    }
+
+    #[test]
+    fn test_format_review_line_highlights_tags() {
+        let theme = ThemeStyles::new(ColorTheme::Dark);
+
+        // Issues-fixed
+        let line = TuiApp::format_review_line("Issues-fixed: 2", &theme);
+        assert_eq!(line.spans.len(), 3);
+        assert_eq!(line.spans[0].content, "");
+        assert_eq!(line.spans[1].content, "Issues-fixed:");
+        assert_eq!(line.spans[1].style.fg, Some(theme.diff_hunk_fg));
+        assert_eq!(line.spans[2].content, " 2");
+
+        // Backport-status
+        let line = TuiApp::format_review_line("Backport-status: clean", &theme);
+        assert_eq!(line.spans.len(), 3);
+        assert_eq!(line.spans[0].content, "");
+        assert_eq!(line.spans[1].content, "Backport-status:");
+        assert_eq!(line.spans[1].style.fg, Some(theme.diff_hunk_fg));
+        assert_eq!(line.spans[2].content, " clean");
+
+        // Backport-upstream (sha tag formatting)
+        let line = TuiApp::format_review_line("Backport-upstream: 1234abcd", &theme);
+        assert_eq!(line.spans.len(), 3);
+        assert_eq!(line.spans[1].content, "Backport-upstream:");
+        assert_eq!(line.spans[1].style.fg, Some(theme.diff_hunk_fg));
+        assert_eq!(line.spans[2].style.fg, Some(theme.findings_downstream_only_fg));
+
+        // Distro-commit (capitalized D)
+        let line = TuiApp::format_review_line("Distro-commit: 5678ef01", &theme);
+        assert_eq!(line.spans[1].content, "Distro-commit:");
+        assert_eq!(line.spans[1].style.fg, Some(theme.diff_hunk_fg));
+        assert_eq!(line.spans[2].style.fg, Some(theme.findings_downstream_only_fg));
+
+        // Regular text that contains tag name as substring should NOT be matched as tag
+        let line = TuiApp::format_review_line("Check the Model: output carefully", &theme);
+        assert_eq!(line.spans.len(), 1);
+        assert_eq!(line.spans[0].content, "Check the Model: output carefully");
     }
 }

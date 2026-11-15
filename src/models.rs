@@ -1917,9 +1917,6 @@ impl InlineReview {
         }
 
         if let Some(ref bp) = self.backport {
-            if let Some(ref up) = bp.upstream {
-                out.push_str(&format!("Backport-upstream: {}\n", up));
-            }
             if let Some(ref st) = bp.status {
                 out.push_str(&format!("Backport-status: {}\n", st));
             }
@@ -2951,5 +2948,27 @@ mod tests {
         let out = inl.render_with_width(None, 80);
         assert!(out.contains("Issues-fixed: 1"));
         assert!(out.contains("Fix-status: fixed-upstream - 58192b9ce09b (upstream)"));
+    }
+
+    #[test]
+    fn test_inline_review_backport_status_and_dropped_backport_upstream() {
+        let inl: InlineReview = serde_json::from_str(
+            r#"{
+                "commit": "c",
+                "author": "a",
+                "subject": "s",
+                "upstream-commit": "1111222233334444555566667777888899990000",
+                "backport": {
+                    "upstream": "1111222233334444555566667777888899990000",
+                    "status": "clean"
+                },
+                "model": "m"
+            }"#,
+        )
+        .unwrap();
+        let out = inl.render_with_width(None, 80);
+        assert!(out.contains("Git-commit: 1111222233334444555566667777888899990000"));
+        assert!(out.contains("Backport-status: clean"));
+        assert!(!out.contains("Backport-upstream:"));
     }
 }
