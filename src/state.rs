@@ -121,12 +121,6 @@ impl AppState {
                     unknown.push(m);
                 }
             }
-            if !unknown.is_empty() {
-                eprintln!(
-                    "Warning: Unknown models in configuration will be ignored: {}",
-                    unknown.join(", ")
-                );
-            }
             if !preserved.is_empty() {
                 self.visible_models = preserved;
             } else {
