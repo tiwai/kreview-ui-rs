@@ -2127,21 +2127,59 @@ impl TuiApp {
         let mut header_cells = vec![CellFormat::header("Subject", theme.header_fg)];
         let mut widths = vec![Constraint::Percentage(50)];
 
-        const MIN_MODEL_COL_WIDTH: u16 = 12;
+        const MIN_MODEL_COL_WIDTH: u16 = 8;
         const MAX_MODEL_COL_WIDTH: u16 = 20;
+
+        let num_models = self.state.visible_models.len() as u16;
+
+        // Preserve enough space for the Subject column to be clearly readable (at least 30 cols on an 80-col terminal).
+        // For 4 models on an 80-col terminal, 11 chars (plus 1 char separator) is the limit.
+        let available_for_models = area.width.saturating_sub(2).saturating_sub(30);
+        let max_from_area = if num_models > 0 {
+            (available_for_models / num_models).saturating_sub(1)
+        } else {
+            MAX_MODEL_COL_WIDTH
+        };
+
+        let max_from_count = match num_models {
+            0..=2 => MAX_MODEL_COL_WIDTH,
+            3 => 14,
+            4 => 11,
+            _ => (48 / num_models).saturating_sub(1).max(MIN_MODEL_COL_WIDTH),
+        };
+
+        let max_allowed = max_from_area
+            .min(max_from_count)
+            .clamp(MIN_MODEL_COL_WIDTH, MAX_MODEL_COL_WIDTH);
+
+        let max_desc_len = self
+            .state
+            .visible_models
+            .iter()
+            .map(|model_id| {
+                models_map
+                    .get(model_id)
+                    .map(|m| &m.description)
+                    .unwrap_or(model_id)
+                    .chars()
+                    .count() as u16
+            })
+            .max()
+            .unwrap_or(MIN_MODEL_COL_WIDTH);
+
+        let model_col_width = max_desc_len.clamp(MIN_MODEL_COL_WIDTH, max_allowed);
 
         for model_id in &self.state.visible_models {
             let desc = models_map
                 .get(model_id)
                 .map(|m| &m.description)
                 .unwrap_or(model_id);
-            let col_width = (desc.chars().count() as u16).clamp(MIN_MODEL_COL_WIDTH, MAX_MODEL_COL_WIDTH);
-            let header_str = match desc.char_indices().nth(col_width as usize) {
+            let header_str = match desc.char_indices().nth(model_col_width as usize) {
                 Some((idx, _)) => &desc[..idx],
                 None => desc,
             };
             header_cells.push(CellFormat::header(header_str, theme.header_fg));
-            widths.push(Constraint::Length(col_width));
+            widths.push(Constraint::Length(model_col_width));
         }
 
         let header_row = Row::new(header_cells)
@@ -4151,6 +4189,102 @@ mod tests {
             buffer_text.contains("Qwen3.8 Flash Next"),
             "Buffer should contain 'Qwen3.8 Flash Next', got:\n{}",
             buffer_text
+        );
+
+        let header_line = (0..buffer.area.height)
+            .map(|y| {
+                let mut line = String::new();
+                for x in 0..buffer.area.width {
+                    line.push_str(buffer.get(x, y).symbol());
+                }
+                line
+            })
+            .find(|line| line.contains("Qwen3.8-27B"))
+            .expect("Header line containing models");
+
+        let pos1 = header_line.find("Qwen3.8-27B").unwrap();
+        let pos2 = header_line.find("Qwen3.8 Flash Next").unwrap();
+        assert_eq!(
+            pos2 - pos1,
+            19,
+            "Both model columns should have the same cell width (18 + 1 spacing), got {} and {}",
+            pos1,
+            pos2
+        );
+
+        let _ = std::fs::remove_dir_all(&temp_dir);
+    }
+
+    #[test]
+    fn test_main_table_model_headers_four_models_width_limit() {
+        let temp_dir = std::env::temp_dir().join(format!(
+            "kreview_test_4models_{}",
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        std::fs::create_dir_all(&temp_dir).unwrap();
+
+        let models = [
+            ("qwen3.8-27b", "Qwen3.8-27B"),
+            ("qwen3.8-flash-next", "Qwen3.8 Flash Next"),
+            ("gpt-oss", "GPT-OSS-20B"),
+            ("gemma-4", "Gemma-4-26B-A4B"),
+        ];
+
+        for (id, desc) in &models {
+            let model_dir = temp_dir.join(id);
+            std::fs::create_dir_all(&model_dir).unwrap();
+            std::fs::write(model_dir.join("description"), desc).unwrap();
+        }
+
+        let mut config = Config::default();
+        config.database_path = temp_dir.clone();
+        let mut state = AppState::new(config);
+        state.visible_models = models.iter().map(|(id, _)| id.to_string()).collect();
+
+        let mut app = TuiApp::new(state);
+
+        // Standard 80x20 terminal
+        let backend = ratatui::backend::TestBackend::new(80, 20);
+        let mut terminal = ratatui::Terminal::new(backend).unwrap();
+        terminal
+            .draw(|f| {
+                app.draw(f);
+            })
+            .unwrap();
+
+        let buffer = terminal.backend().buffer();
+        let header_line = (0..buffer.area.height)
+            .map(|y| {
+                let mut line = String::new();
+                for x in 0..buffer.area.width {
+                    line.push_str(buffer.get(x, y).symbol());
+                }
+                line
+            })
+            .find(|line| line.contains("Subject"))
+            .expect("Header line containing Subject and models");
+
+        let pos_subject = header_line.find("Subject").unwrap();
+        let pos1 = header_line.find("Qwen3.8-27B").unwrap();
+        // At 11 chars width, "Qwen3.8 Flash Next" is truncated to 11 chars: "Qwen3.8 Fla"
+        let pos2 = header_line.find("Qwen3.8 Fla").unwrap();
+        let pos3 = header_line.find("GPT-OSS-20B").unwrap();
+        // "Gemma-4-26B-A4B" is truncated to 11 chars: "Gemma-4-26B"
+        let pos4 = header_line.find("Gemma-4-26B").unwrap();
+
+        // Each model column should have width 11 + 1 spacing = 12 distance
+        assert_eq!(pos2 - pos1, 12, "Model 1 to 2 spacing should be 12 (11 chars + 1 separator)");
+        assert_eq!(pos3 - pos2, 12, "Model 2 to 3 spacing should be 12 (11 chars + 1 separator)");
+        assert_eq!(pos4 - pos3, 12, "Model 3 to 4 spacing should be 12 (11 chars + 1 separator)");
+
+        // Subject column should have at least 30 chars of width
+        assert!(
+            pos1 - pos_subject >= 30,
+            "Subject column width must be at least 30, got {}",
+            pos1 - pos_subject
         );
 
         let _ = std::fs::remove_dir_all(&temp_dir);
