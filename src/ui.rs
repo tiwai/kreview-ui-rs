@@ -128,6 +128,7 @@ pub struct ContentViewerState {
     pub source_json: Option<String>,
     pub diff_content: Option<String>,
     pub rendered_width: Option<usize>,
+    pub badges: Vec<&'static str>,
 }
 
 impl ContentViewerState {
@@ -167,6 +168,7 @@ impl ContentViewerState {
             source_json: None,
             diff_content: None,
             rendered_width: None,
+            badges: Vec::new(),
         }
     }
 
@@ -191,6 +193,7 @@ impl ContentViewerState {
             source_json: None,
             diff_content: None,
             rendered_width: None,
+            badges: Vec::new(),
         }
     }
 }
@@ -2037,21 +2040,18 @@ impl TuiApp {
         if index < self.state.visible_models.len() {
             let model_id = &self.state.visible_models[index];
             if let Some(review) = commit.reviews.get(model_id) {
-                if let Some((mut content, source_json, diff_content, rendered_width)) =
+                if let Some((content, source_json, diff_content, rendered_width)) =
                     self.get_rendered_review_details(model_id, commit)
                 {
-                    let mut banners = String::new();
+                    let mut badges = Vec::new();
                     if review.has_pre_verification {
-                        banners.push_str("Pre-verification: AVAILABLE (Press 'V' to view)\n\n");
+                        badges.push("V:pre-verify");
                     }
                     if review.has_verified_result {
-                        banners.push_str("Verified Result: AVAILABLE (Press 'v' to view)\n\n");
+                        badges.push("v:verified");
                     }
                     if review.has_fix_patches {
-                        banners.push_str("AI Fix Patches: AVAILABLE (Press 'p' to view)\n\n");
-                    }
-                    if !banners.is_empty() {
-                        content = format!("{}{}", banners, content);
+                        badges.push("p:fix-patches");
                     }
                     let models_map = self.state.db.load_models();
                     let name = models_map
@@ -2078,6 +2078,7 @@ impl TuiApp {
                     cv_state.source_json = source_json;
                     cv_state.diff_content = diff_content;
                     cv_state.rendered_width = rendered_width;
+                    cv_state.badges = badges;
 
                     self.active_screen = ActiveScreen::ContentViewer(cv_state);
                 }
@@ -2100,21 +2101,18 @@ impl TuiApp {
         if let Some(commit) = commit_opt {
             let model_id = &self.state.visible_models[index];
             if let Some(review) = commit.reviews.get(model_id) {
-                if let Some((mut content, source_json, diff_content, rendered_width)) =
+                if let Some((content, source_json, diff_content, rendered_width)) =
                     self.get_rendered_review_details(model_id, &commit)
                 {
-                    let mut banners = String::new();
+                    let mut badges = Vec::new();
                     if review.has_pre_verification {
-                        banners.push_str("Pre-verification: AVAILABLE (Press 'V' to view)\n\n");
+                        badges.push("V:pre-verify");
                     }
                     if review.has_verified_result {
-                        banners.push_str("Verified Result: AVAILABLE (Press 'v' to view)\n\n");
+                        badges.push("v:verified");
                     }
                     if review.has_fix_patches {
-                        banners.push_str("AI Fix Patches: AVAILABLE (Press 'p' to view)\n\n");
-                    }
-                    if !banners.is_empty() {
-                        content = format!("{}{}", banners, content);
+                        badges.push("p:fix-patches");
                     }
                     let models_map = self.state.db.load_models();
                     let name = models_map
@@ -2141,6 +2139,7 @@ impl TuiApp {
                     cv_state.source_json = source_json;
                     cv_state.diff_content = diff_content;
                     cv_state.rendered_width = rendered_width;
+                    cv_state.badges = badges;
 
                     self.active_screen = ActiveScreen::ContentViewer(cv_state);
                 }
@@ -2149,16 +2148,7 @@ impl TuiApp {
     }
 
     fn save_content_to_file(s: &ContentViewerState) -> io::Result<String> {
-        let mut raw = s.content.as_str();
-        if let Some(rest) = raw.strip_prefix("Pre-verification: AVAILABLE (Press 'V' to view)\n\n") {
-            raw = rest;
-        }
-        if let Some(rest) = raw.strip_prefix("Verified Result: AVAILABLE (Press 'v' to view)\n\n") {
-            raw = rest;
-        }
-        if let Some(rest) = raw.strip_prefix("AI Fix Patches: AVAILABLE (Press 'p' to view)\n\n") {
-            raw = rest;
-        }
+        let raw = s.content.as_str();
         let plain = strip_markup(raw);
 
         let filename = title_to_filename(&s.title);
@@ -2237,17 +2227,6 @@ impl TuiApp {
                             serde_json::from_str::<crate::models::InlineReview>(json_str)
                         {
                             let content = inline_review.render_with_width(Some(diff), target_width);
-                            let mut prefix = String::new();
-                            if s.content.contains("Pre-verification: AVAILABLE (Press 'V' to view)\n\n") {
-                                prefix.push_str("Pre-verification: AVAILABLE (Press 'V' to view)\n\n");
-                            }
-                            if s.content.contains("Verified Result: AVAILABLE (Press 'v' to view)\n\n") {
-                                prefix.push_str("Verified Result: AVAILABLE (Press 'v' to view)\n\n");
-                            }
-                            if s.content.contains("AI Fix Patches: AVAILABLE (Press 'p' to view)\n\n") {
-                                prefix.push_str("AI Fix Patches: AVAILABLE (Press 'p' to view)\n\n");
-                            }
-                            let content = format!("{}{}", prefix, content);
                             s.content = content.clone();
                             s.lines = content
                                 .lines()
@@ -2905,6 +2884,21 @@ impl TuiApp {
             }
         }
 
+        let mut block = Block::default()
+            .borders(Borders::ALL)
+            .title(format!(" {} ", s.title));
+        if !s.badges.is_empty() {
+            block = block.title_bottom(
+                Line::from(Span::styled(
+                    format!(" {} ", s.badges.join(" | ")),
+                    Style::default()
+                        .fg(theme.verified_result_fg)
+                        .add_modifier(Modifier::BOLD),
+                ))
+                .right_aligned(),
+            );
+        }
+
         let p = Paragraph::new(text_lines)
             .style(
                 Style::default()
@@ -2912,11 +2906,7 @@ impl TuiApp {
                     .bg(theme.default_bg),
             )
             .scroll((0, s.horizontal_scroll_offset as u16))
-            .block(
-                Block::default()
-                    .borders(Borders::ALL)
-                    .title(format!(" {} ", s.title)),
-            );
+            .block(block);
         f.render_widget(p, area);
     }
 
@@ -4608,8 +4598,8 @@ mod tests {
         match &app.active_screen {
             ActiveScreen::ContentViewer(s) => {
                 assert!(s.title.contains("Review:"));
-                // Verify banner is present
-                assert!(s.content.contains("Pre-verification: AVAILABLE (Press 'V' to view)"));
+                // Verify badge is present
+                assert!(s.badges.contains(&"V:pre-verify"));
             }
             _ => panic!("Expected ContentViewer screen for Review"),
         }
