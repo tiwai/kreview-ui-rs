@@ -2814,6 +2814,21 @@ impl TuiApp {
         }
     }
 
+    /// Whether `lines[idx]` belongs to the subject paragraph that follows the
+    /// "commit/Author/Committer" header of a rendered review.
+    pub(crate) fn is_review_subject_line(lines: &[String], idx: usize) -> bool {
+        if lines.get(idx).map_or(true, |l| l.is_empty()) {
+            return false;
+        }
+        let mut start = idx;
+        while start > 0 && !lines[start - 1].is_empty() {
+            start -= 1;
+        }
+        start >= 2
+            && (lines[start - 2].starts_with("Author:")
+                || lines[start - 2].starts_with("Committer:"))
+    }
+
     fn draw_content_viewer(&self, f: &mut Frame, area: Rect, s: &ContentViewerState) {
         let theme_type = self.theme();
         let theme = ThemeStyles::new(theme_type);
@@ -2879,6 +2894,13 @@ impl TuiApp {
             } else if s.is_downstream_view {
                 // Style as downstream summary using our tag parser
                 text_lines.push(Self::parse_downstream_summary_line(line, &theme));
+            } else if Self::is_review_subject_line(&s.lines, idx) {
+                text_lines.push(Line::from(Span::styled(
+                    line.as_str().to_string(),
+                    Style::default()
+                        .fg(theme.help_key_fg)
+                        .add_modifier(Modifier::BOLD),
+                )));
             } else {
                 text_lines.push(Self::format_review_line(line, &theme));
             }
@@ -4654,5 +4676,27 @@ mod tests {
         let line = TuiApp::format_review_line("Check the Model: output carefully", &theme);
         assert_eq!(line.spans.len(), 1);
         assert_eq!(line.spans[0].content, "Check the Model: output carefully");
+    }
+
+    #[test]
+    fn test_is_review_subject_line() {
+        let lines: Vec<String> = [
+            "commit abc",
+            "Author: A",
+            "Committer: B",
+            "",
+            "- smb: client: subject",
+            "  continued",
+            "",
+            "distro-commit: 1234",
+        ]
+        .iter()
+        .map(|s| s.to_string())
+        .collect();
+        assert!(!TuiApp::is_review_subject_line(&lines, 2));
+        assert!(!TuiApp::is_review_subject_line(&lines, 3));
+        assert!(TuiApp::is_review_subject_line(&lines, 4));
+        assert!(TuiApp::is_review_subject_line(&lines, 5));
+        assert!(!TuiApp::is_review_subject_line(&lines, 7));
     }
 }
