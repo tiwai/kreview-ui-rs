@@ -50,6 +50,8 @@ pub struct AppState {
     // Current branch details
     pub current_branch: Option<Branch>,
     pub visible_models: Vec<String>,
+    /// User's preferred model selection; survives branches with fewer models
+    pub preferred_models: Vec<String>,
 
     // Commits on branch
     pub commits: Vec<CommitReview>,
@@ -78,6 +80,7 @@ impl AppState {
             config,
             db,
             current_branch: None,
+            preferred_models: visible_models.clone(),
             visible_models,
             commits: Vec::new(),
             filtered_commits: Vec::new(),
@@ -93,7 +96,7 @@ impl AppState {
     }
 
     pub fn load_branch(&mut self, branch_name: &str) -> Result<Vec<String>, String> {
-        let previous_visible = self.visible_models.clone();
+        let previous_visible = self.preferred_models.clone();
 
         let branch = self.db.load_branch(branch_name)?;
         let models_map = self.db.load_models();

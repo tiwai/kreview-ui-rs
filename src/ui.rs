@@ -751,6 +751,7 @@ impl TuiApp {
                             .collect();
 
                         if !new_visible.is_empty() {
+                            self.state.preferred_models = new_visible.clone();
                             self.state.visible_models = new_visible;
                             self.state.apply_filters();
                             self.selected_col = 0;
